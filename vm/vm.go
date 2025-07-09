@@ -1,0 +1,163 @@
+package vm
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+)
+
+// --- Constants ---
+const (
+	NumRegisters = 4
+)
+
+// --- Instruction Set Opcodes ---
+const (
+	NOOP byte = iota
+	SET
+	COPY
+	ADD
+	SUB
+	JUMP_REL_IF_ZERO
+	READ_REL
+	WRITE_REL
+	SPAWN
+	NumOpcodes // This must be the last entry, it counts the number of opcodes
+)
+
+var OpcodeNames = [...]string{
+	"NOOP",
+	"SET",
+	"COPY",
+	"ADD",
+	"SUB",
+	"JUMP_REL_IF_ZERO",
+	"READ_REL",
+	"WRITE_REL",
+	"SPAWN",
+}
+
+// IP represents an Instruction Pointer, our digital organism.
+// It holds its own registers and all the tools needed to spawn a child.
+type IP struct {
+	ID        int
+	Registers [NumRegisters]int32
+	Soup      []int32
+	Steps     int64 // Number of steps executed
+
+	// --- Spawning & Concurrency Tools ---
+	// These are pointers to the main simulation state.
+	Population *sync.Map
+	Wg         *sync.WaitGroup
+	NextIPID   *int32
+	Ctx        context.Context
+	RunIP      func(p *IP, ctx context.Context, wg *sync.WaitGroup)
+
+	// Counters for metrics
+	SpawnAttempt int64
+	OpcodeCounts [NumOpcodes]int64
+
+	CurrentPtr int32 // Current instruction pointer in the soup
+}
+
+// NewIP creates a new, minimal instruction pointer.
+// The concurrency tools (Population, Wg, etc.) must be set by the main loop.
+func NewIP(id int, soup []int32, startPtr int32) *IP {
+	return &IP{
+		ID:         id,
+		Soup:       soup,
+		CurrentPtr: startPtr,
+	}
+}
+
+// Step executes a single instruction from the soup.
+func (ip *IP) Step() {
+	soupLen := int32(len(ip.Soup))
+	// The pointer should always be valid at the start of a step due to the wrap at the end.
+
+	// Helper function to safely read a value from the soup, handling pointer wrap.
+	safeReadSoup := func() int32 {
+		val := ip.Soup[(ip.CurrentPtr%soupLen + soupLen) % soupLen]
+		ip.CurrentPtr++
+		return val
+	}
+
+	opcode := (safeReadSoup()%int32(NumOpcodes) + int32(NumOpcodes)) % int32(NumOpcodes)
+	ip.OpcodeCounts[opcode]++
+	originalPtr := ip.CurrentPtr
+
+	// Helper function to safely read a register index from the soup.
+	safeRegIndex := func() int32 {
+				val := safeReadSoup()
+		return (val%NumRegisters + NumRegisters) % NumRegisters
+	}
+
+	// --- Instruction Decoder ---
+	switch byte(opcode) {
+	case NOOP:
+		// PC already incremented
+	case SET:
+		regDest := safeRegIndex()
+		value := safeReadSoup()
+		ip.Registers[regDest] = value
+	case COPY:
+		regDest := safeRegIndex()
+		regSrc := safeRegIndex()
+		ip.Registers[regDest] = ip.Registers[regSrc]
+	case ADD:
+		regDest := safeRegIndex()
+		regSrc1 := safeRegIndex()
+		regSrc2 := safeRegIndex()
+		ip.Registers[regDest] = ip.Registers[regSrc1] + ip.Registers[regSrc2]
+	case SUB:
+		regDest := safeRegIndex()
+		regSrc1 := safeRegIndex()
+		regSrc2 := safeRegIndex()
+		ip.Registers[regDest] = ip.Registers[regSrc1] - ip.Registers[regSrc2]
+	case JUMP_REL_IF_ZERO:
+		regCond := safeRegIndex()
+		regOffset := safeRegIndex() // Always read both arguments
+		if ip.Registers[regCond] == 0 {
+			// Jump relative to the current pointer (which is already past the arguments)
+			ip.CurrentPtr += ip.Registers[regOffset]
+		}
+	case READ_REL:
+		regDest := safeRegIndex()
+		regOffset := safeRegIndex()
+		readAddr := originalPtr + ip.Registers[regOffset]
+		readAddr = (readAddr%soupLen + soupLen) % soupLen // Wrap address
+		ip.Registers[regDest] = ip.Soup[readAddr]
+	case WRITE_REL:
+		regSrc := safeRegIndex()
+		regOffset := safeRegIndex()
+		writeAddr := originalPtr + ip.Registers[regOffset]
+		writeAddr = (writeAddr%soupLen + soupLen) % soupLen // Wrap address
+		ip.Soup[writeAddr] = ip.Registers[regSrc]
+	case SPAWN:
+		// The IP is now fully autonomous in spawning.
+		ip.SpawnAttempt++
+		regOffset := safeRegIndex()
+		childStartPtr := originalPtr + ip.Registers[regOffset]
+		childStartPtr = (childStartPtr%soupLen + soupLen) % soupLen // Wrap address
+
+		// Generate the new child
+		newID := atomic.AddInt32(ip.NextIPID, 1)
+		child := NewIP(int(newID), ip.Soup, childStartPtr)
+
+		// Grant the child the same tools the parent has.
+		child.Population = ip.Population
+		child.Wg = ip.Wg
+		child.NextIPID = ip.NextIPID
+		child.RunIP = ip.RunIP
+		child.Ctx = ip.Ctx
+
+		// Add the child to the population and the WaitGroup, then launch it.
+		ip.Population.Store(child.ID, child)
+		ip.Wg.Add(1)
+		go ip.RunIP(child, ip.Ctx, ip.Wg)
+	}
+
+	// Wrap the final pointer to ensure it's always valid.
+	ip.CurrentPtr = (ip.CurrentPtr%soupLen + soupLen) % soupLen
+	ip.Steps++
+}
