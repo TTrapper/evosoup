@@ -60,6 +60,28 @@ type IP struct {
 	CurrentPtr int32 // Current instruction pointer in the soup
 }
 
+// SavableIP defines the data for an IP that can be saved in a snapshot.
+type SavableIP struct {
+	ID           int
+	CurrentPtr   int32
+	Registers    [NumRegisters]int32
+	Steps        int64
+	SpawnAttempt int64
+	OpcodeCounts [NumOpcodes]int64
+}
+
+// Savable returns a serializable representation of the IP.
+func (ip *IP) Savable() SavableIP {
+	return SavableIP{
+		ID:           ip.ID,
+		CurrentPtr:   ip.CurrentPtr,
+		Registers:    ip.Registers, // Add this line
+		Steps:        ip.Steps,
+		SpawnAttempt: ip.SpawnAttempt,
+		OpcodeCounts: ip.OpcodeCounts,
+	}
+}
+
 // NewIP creates a new, minimal instruction pointer.
 // The concurrency tools (Population, Wg, etc.) must be set by the main loop.
 func NewIP(id int, soup []int32, startPtr int32) *IP {

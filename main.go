@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/gob"
 	"evolution/vm"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,7 +18,18 @@ const (
 	InitialNumIPs         = 4096 * 128
 	GenerationTimeSeconds = 1
 	MinStepsPerGen        = 1 // Minimum steps to be considered "alive"
+	SnapshotInterval      = 10 // Save a snapshot every 100 generations
 )
+
+// SimulationState represents the entire state of the simulation to be saved.
+type SimulationState struct {
+	Generation int
+	Soup       []int32
+	IPs        []vm.SavableIP
+	NextIPID   int32
+	RandSeed   int64 // To be able to resume with the same random sequence
+}
+
 
 // runIP is the function that executes in each IP's goroutine.
 func runIP(p *vm.IP, ctx context.Context, wg *sync.WaitGroup) {
@@ -31,10 +44,28 @@ func runIP(p *vm.IP, ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
+// saveSnapshot function
+func saveSnapshot(state SimulationState, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot file: %w", err)
+	}
+	defer file.Close()
+
+	encoder := gob.NewEncoder(file)
+	if err := encoder.Encode(state); err != nil {
+		return fmt.Errorf("failed to encode snapshot: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	fmt.Println("--- EvoSoup: A Go-based Artificial Life Simulation ---")
 
 	// --- Initialization ---
+	seed := time.Now().UnixNano()
+	rand.Seed(seed)
+
 	soup := make([]int32, SoupSize)
 	for i := range soup {
 		soup[i] = int32(rand.Intn(9))
@@ -57,15 +88,13 @@ func main() {
 		initialCount++
 		return true
 	})
-	fmt.Printf("Simulation started with %d IPs in a soup of %d instructions.\n", initialCount, SoupSize)
+	fmt.Printf("Simulation started with %d IPs in a soup of %d instructions. Seed: %d\n", initialCount, SoupSize, seed)
 
 	// --- Main Generation Loop ---
 	for gen := 1; ; gen++ {
-		fmt.Printf("\n--- Generation %d ---\n", gen)
-
 		// --- Per-Generation State ---
 		var wg sync.WaitGroup
-		ctx, cancel := context.WithTimeout(context.Background(), GenerationTimeSeconds*time.Second)
+    ctx, cancel := context.WithTimeout(context.Background(), GenerationTimeSeconds*time.Second)
 
 		// Start goroutines for the initial population of this generation.
 		// We must iterate over the map and inject the required concurrency tools into each IP.
@@ -91,8 +120,6 @@ func main() {
 
 		wg.Wait() // Wait for all goroutines (including spawned children) to finish.
 		cancel()  // Clean up context resources.
-
-		fmt.Println("Generation finished. Evaluating fitness...")
 
 		// --- Culling and Replication ---
 		var totalSteps int64
@@ -120,14 +147,6 @@ func main() {
 			return true
 		})
 
-		fmt.Printf("Spawn Successful/Attempts: %d.\n", successfulSpawns)
-		fmt.Printf("Total steps: %d. Population size: %d -> %d (alive).\n", totalSteps, currentPopSize, aliveCount)
-
-		fmt.Println("Opcode Execution Counts:")
-		for i, count := range opcodeCounts {
-			fmt.Printf("  %s: %d\n", vm.OpcodeNames[i], count)
-		}
-
 		if aliveCount == 0 {
 			fmt.Println("Extinction event! No IPs survived. Re-seeding population.")
 			// Clear the map for a fresh start
@@ -142,5 +161,36 @@ func main() {
 			population = newPopulation
 		}
 
+		// --- Consolidated Logging ---
+		fmt.Printf("Gen: %-6d | Pop: %-5d | Steps: %-10d | Spawns: %-5d",
+			gen, aliveCount, totalSteps, successfulSpawns)
+
+		// --- Snapshotting ---
+		if gen%SnapshotInterval == 0 {
+				var savableIPs []vm.SavableIP
+				population.Range(func(key, value interface{}) bool {
+						ip := value.(*vm.IP)
+						// Simply call the new method to get the savable version
+						savableIPs = append(savableIPs, ip.Savable())
+						return true
+				})
+
+				snapshotState := SimulationState{
+						Generation: gen,
+						Soup:       soup,
+						IPs:        savableIPs, // The list is now built more cleanly
+						NextIPID:   atomic.LoadInt32(&nextIPID),
+						RandSeed:   seed,
+				}
+
+				snapshotFilename := "snapshot.gob"
+				if err := saveSnapshot(snapshotState, snapshotFilename); err != nil {
+						fmt.Printf(" (Error saving snapshot: %v)\n", err)
+				} else {
+						fmt.Printf(" (Snapshot saved to %s)\n", snapshotFilename)
+				}
+		} else {
+				fmt.Println()
+		}
 	}
 }
