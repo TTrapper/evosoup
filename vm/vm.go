@@ -2,13 +2,16 @@ package vm
 
 import (
 	"context"
+	"encoding/binary"
+	"hash/fnv"
 	"sync"
 	"sync/atomic"
 )
 
 // --- Constants ---
 const (
-	NumRegisters = 4
+	NumRegisters      = 4
+	GenomeSnippetSize = 32
 )
 
 // --- Instruction Set Opcodes ---
@@ -54,8 +57,9 @@ type IP struct {
 	RunIP      func(p *IP, ctx context.Context, wg *sync.WaitGroup)
 
 	// Counters for metrics
-	SpawnAttempt int64
-	OpcodeCounts [NumOpcodes]int64
+	SpawnAttempt     int64
+	OpcodeCounts     [NumOpcodes]int64
+	SpawnedGenotypes []uint64 // To track the genotypes of spawned children
 
 	CurrentPtr int32 // Current instruction pointer in the soup
 }
@@ -75,7 +79,7 @@ func (ip *IP) Savable() SavableIP {
 	return SavableIP{
 		ID:           ip.ID,
 		CurrentPtr:   ip.CurrentPtr,
-		Registers:    ip.Registers, // Add this line
+		Registers:    ip.Registers,
 		Steps:        ip.Steps,
 		SpawnAttempt: ip.SpawnAttempt,
 		OpcodeCounts: ip.OpcodeCounts,
@@ -86,9 +90,10 @@ func (ip *IP) Savable() SavableIP {
 // The concurrency tools (Population, Wg, etc.) must be set by the main loop.
 func NewIP(id int, soup []int32, startPtr int32) *IP {
 	return &IP{
-		ID:         id,
-		Soup:       soup,
-		CurrentPtr: startPtr,
+		ID:               id,
+		Soup:             soup,
+		CurrentPtr:       startPtr,
+		SpawnedGenotypes: make([]uint64, 0),
 	}
 }
 
@@ -99,7 +104,7 @@ func (ip *IP) Step() {
 
 	// Helper function to safely read a value from the soup, handling pointer wrap.
 	safeReadSoup := func() int32 {
-		val := ip.Soup[(ip.CurrentPtr%soupLen + soupLen) % soupLen]
+		val := ip.Soup[(ip.CurrentPtr%soupLen+soupLen)%soupLen]
 		ip.CurrentPtr++
 		return val
 	}
@@ -110,14 +115,14 @@ func (ip *IP) Step() {
 
 	// Helper function to safely read a register index from the soup.
 	safeRegIndex := func() int32 {
-				val := safeReadSoup()
+		val := safeReadSoup()
 		return (val%NumRegisters + NumRegisters) % NumRegisters
 	}
 
 	// --- Instruction Decoder ---
 	switch byte(opcode) {
 	case NOOP:
-		// PC already incremented
+	// PC already incremented
 	case SET:
 		regDest := safeRegIndex()
 		value := safeReadSoup()
@@ -161,6 +166,21 @@ func (ip *IP) Step() {
 		regOffset := safeRegIndex()
 		childStartPtr := originalPtr + ip.Registers[regOffset]
 		childStartPtr = (childStartPtr%soupLen + soupLen) % soupLen // Wrap address
+
+		// --- Genotype Snippet Hashing ---
+		snippet := make([]int32, GenomeSnippetSize)
+		for i := 0; i < GenomeSnippetSize; i++ {
+			snippet[i] = ip.Soup[(childStartPtr+int32(i))%soupLen]
+		}
+		hasher := fnv.New64a()
+		buf := make([]byte, 4)
+		for _, val := range snippet {
+			binary.LittleEndian.PutUint32(buf, uint32(val))
+			hasher.Write(buf)
+		}
+		genotypeHash := hasher.Sum64()
+		ip.SpawnedGenotypes = append(ip.SpawnedGenotypes, genotypeHash)
+		// --- End Hashing ---
 
 		// Generate the new child
 		newID := atomic.AddInt32(ip.NextIPID, 1)
