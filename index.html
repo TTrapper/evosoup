@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>EvoSoup Visualization</title>
+    <style>
+        body { font-family: monospace; background-color: #2e2e2e; color: #d3d3d3; }
+        canvas { border: 1px solid #555; image-rendering: pixelated; image-rendering: -moz-crisp-edges; }
+    </style>
+</head>
+<body>
+    <h1>EvoSoup Live Visualization</h1>
+    <p>Generation: <span id="gen">0</span> | Population: <span id="pop">0</span> | Steps/sec: <span id="steps">0</span> | Entropy: <span id="entropy">0.00</span></p>
+    <canvas id="soupCanvas"></canvas>
+
+    <script>
+        // --- Canvas and WebSocket Setup ---
+        const canvas = document.getElementById('soupCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // These colors MUST match the order and number on your Go server.
+        const opcodeColors = [
+            [46, 46, 46, 255],    // 0: NOOP
+            [78, 154, 6, 255],    // 1: SET
+            [52, 101, 164, 255],  // 2: COPY
+            [117, 80, 123, 255],  // 3: ADD
+            [204, 0, 0, 255],     // 4: SUB
+            [245, 121, 0, 255],   // 5: JUMP_REL_IF_ZERO
+            [196, 160, 0, 255],   // 6: READ_REL
+            [164, 0, 0, 255],     // 7: WRITE_REL
+            [119, 33, 111, 255],  // 8: SPAWN
+        ];
+
+        // --- Data Display Elements ---
+        const genSpan = document.getElementById('gen');
+        const popSpan = document.getElementById('pop');
+        const stepsSpan = document.getElementById('steps');
+        const entropySpan = document.getElementById('entropy');
+
+        // --- WebSocket Connection ---
+        const socket = new WebSocket('ws://localhost:8080/ws');
+        socket.binaryType = 'arraybuffer'; // Critical for performance!
+
+        let imageData; // To hold our pixel data
+        let imageDataBuffer; // The underlying Uint8ClampedArray for fast writes
+
+        socket.onmessage = function(event) {
+            // We expect two types of messages:
+            // 1. JSON string for stats (TextMessage)
+            // 2. ArrayBuffer for the soup visualization (BinaryMessage)
+
+            if (typeof event.data === 'string') {
+                // --- Handle Stats Update ---
+                const stats = JSON.parse(event.data);
+                genSpan.textContent = stats.Generation;
+                popSpan.textContent = stats.Population;
+                stepsSpan.textContent = (stats.Steps / 1_000_000).toFixed(2) + "M";
+                entropySpan.textContent = stats.Entropy.toFixed(2);
+
+            } else if (event.data instanceof ArrayBuffer) {
+                // --- Handle Canvas Update ---
+                const colorIndices = new Uint8Array(event.data);
+                const soupSize = colorIndices.length;
+                const canvasSize = Math.sqrt(soupSize);
+
+                // Initialize ImageData on the first frame
+                if (!imageData) {
+                    canvas.width = canvasSize;
+                    canvas.height = canvasSize;
+                    imageData = ctx.createImageData(canvasSize, canvasSize);
+                    imageDataBuffer = imageData.data; // Get a reference to the pixel buffer
+                }
+
+                // Loop through the received indices and set the RGBA values
+                for (let i = 0; i < soupSize; i++) {
+                    const color = opcodeColors[colorIndices[i]];
+                    const pixelIndex = i * 4;
+                    imageDataBuffer[pixelIndex]     = color[0]; // R
+                    imageDataBuffer[pixelIndex + 1] = color[1]; // G
+                    imageDataBuffer[pixelIndex + 2] = color[2]; // B
+                    imageDataBuffer[pixelIndex + 3] = color[3]; // A
+                }
+
+                // Draw the updated image data to the canvas in one go. 🚀
+                ctx.putImageData(imageData, 0, 0);
+            }
+        };
+
+        socket.onopen = function(event) {
+            console.log("WebSocket connection established.");
+        };
+
+        socket.onerror = function(error) {
+            console.error("WebSocket Error: ", error);
+        };
+    </script>
+</body>
+</html>

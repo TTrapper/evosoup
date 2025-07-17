@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/gob"
+	"encoding/json"
 	"evolution/vm"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -16,11 +18,12 @@ import (
 
 // --- Simulation Constants ---
 const (
-	SoupSize              = 1024 * 1024 * 16
-	InitialNumIPs         = 4096 * 128
+	SoupSize              = 1024 * 1024
+	InitialNumIPs         = 4096
 	GenerationTimeSeconds = 1
-	MinStepsPerGen        = 1 // Minimum steps to be considered "alive"
-	SnapshotInterval      = 10 // Save a snapshot every 100 generations
+	MinStepsPerGen        = 1   // Minimum steps to be considered "alive"
+	SnapshotInterval      = 100 // Save a snapshot every 100 generations
+	TargetFPS             = 30  // Target a smooth FPS
 )
 
 // SimulationState represents the entire state of the simulation to be saved.
@@ -63,16 +66,22 @@ func saveSnapshot(state SimulationState, filename string) error {
 func main() {
 	fmt.Println("--- EvoSoup: A Go-based Artificial Life Simulation ---")
 
-	// --- Initialization ---
+	// 1. Create and run the WebSocket hub from our websocket.go file
+	hub := NewHub()
+	go hub.Run()
+
+	// 2. Start the web server from our websocket.go file
+	go StartServer(hub)
+
+	// --- 3. Initialize Simulation ---
 	seed := time.Now().UnixNano()
 	rand.Seed(seed)
 
 	soup := make([]int32, SoupSize)
 	for i := range soup {
-		soup[i] = int32(rand.Intn(9))
+    soup[i] = int32(rand.Intn(9))
 	}
 
-	// The master list of IPs is now a sync.Map for concurrent-safe access.
 	var population sync.Map
 	var nextIPID int32 = 0
 
@@ -91,17 +100,36 @@ func main() {
 	})
 	fmt.Printf("Simulation started with %d IPs in a soup of %d instructions. Seed: %d\n", initialCount, SoupSize, seed)
 
-	// --- Main Generation Loop ---
+	// --- 4. Real-time Visualization Goroutine ---
+	go func() {
+		ticker := time.NewTicker(time.Second / TargetFPS)
+		defer ticker.Stop()
+
+		colorIndices := make([]byte, SoupSize)
+		numColors := int32(9) // The number of opcodes/colors you have
+
+		for range ticker.C {
+			// Create the color index map from the current soup state
+			for i, val := range soup {
+				colorIndex := (val%numColors + numColors) % numColors
+				colorIndices[i] = byte(colorIndex)
+			}
+
+			// Send the raw byte slice to the hub's public broadcast channel.
+			hub.Broadcast <- colorIndices
+		}
+	}()
+
+	// --- 5. Main Generation Loop ---
 	for gen := 1; ; gen++ {
-		// --- Per-Generation State ---
+    // --- Per-Generation State ---
 		var wg sync.WaitGroup
 		ctx, cancel := context.WithTimeout(context.Background(), GenerationTimeSeconds*time.Second)
 
-		// Start goroutines for the initial population of this generation.
+    // Start goroutines for the initial population of this generation.
 		population.Range(func(key, value interface{}) bool {
 			ip := value.(*vm.IP)
-
-			// Reset state and inject tools
+      // Reset state and inject tools
 			ip.Steps = 0
 			ip.SpawnAttempt = 0
 			ip.SpawnedGenotypes = ip.SpawnedGenotypes[:0] // Reset for new generation
@@ -123,12 +151,9 @@ func main() {
 		cancel()  // Clean up context resources.
 
 		// --- Culling, Replication, and Analysis ---
-		var totalSteps int64
-		var successfulSpawns int64
-
+		var totalSteps, successfulSpawns int64
 		phenotypeCounts := make(map[string]int)
 		genotypeCounts := make(map[uint64]int)
-
 		newPopulation := sync.Map{}
 		aliveCount := 0
 
@@ -149,7 +174,10 @@ func main() {
 				// Calculate phenotype for this surviving IP
 				var keyBuilder strings.Builder
 				for i, count := range ip.OpcodeCounts {
-					normalized := int(math.Round((float64(count) / float64(ip.Steps)) * 100))
+					normalized := 0
+					if ip.Steps > 0 {
+						normalized = int(math.Round((float64(count) / float64(ip.Steps)) * 100))
+					}
 					keyBuilder.WriteString(fmt.Sprintf("%d", normalized))
 					if i < len(ip.OpcodeCounts)-1 {
 						keyBuilder.WriteString(",")
@@ -214,11 +242,27 @@ func main() {
 			}
 		}
 
-		// --- Consolidated Logging ---
+		// --- Consolidated Logging & Stats Broadcast ---
 		fmt.Printf("Gen: %-6d | Pop: %-5d | Steps: %-10d | Spawns: %-5d",
 			gen, aliveCount, totalSteps, successfulSpawns)
 		fmt.Printf(" | Phenos: %-4d (Dom: %2.0f%%) | Genos: %-4d (Dom: %2.0f%%) | Entropy: %-4.2f",
 			numPhenotypes, domPhenoPct, numGenotypes, domGenoPct, soupEntropy)
+
+		// --- Stats Broadcast ---
+		// The GenerationStats struct is now defined in websocket.go
+		stats := GenerationStats{
+			Generation: gen,
+			Population: aliveCount,
+			Steps:      totalSteps,
+			Spawns:     successfulSpawns,
+			Entropy:    soupEntropy,
+		}
+		jsonData, err := json.Marshal(stats)
+		if err != nil {
+			log.Printf("error marshalling json: %v", err)
+		} else {
+			hub.Broadcast <- jsonData
+		}
 
 		// --- Snapshotting ---
 		if gen%SnapshotInterval == 0 {
