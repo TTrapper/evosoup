@@ -79,7 +79,7 @@ func main() {
 
 	soup := make([]int32, SoupSize)
 	for i := range soup {
-    soup[i] = int32(rand.Intn(9))
+    soup[i] = rand.Int31()
 	}
 
 	var population sync.Map
