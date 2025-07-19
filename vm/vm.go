@@ -2,6 +2,7 @@ package vm
 
 import (
 	"math/rand"
+	"sync/atomic"
 )
 
 // --- Constants ---
@@ -30,10 +31,11 @@ var OpcodeNames = [...]string{
 
 // IP represents an Instruction Pointer, our digital organism.
 type IP struct {
-	ID         int
-	CurrentPtr int32 // Current instruction pointer in the soup
-	Steps      int64 // Number of steps executed
-	Soup       []int32
+	ID            int
+	CurrentPtr    int32 // Current instruction pointer in the soup
+	Steps         int64 // Number of steps executed
+	Soup          []int32
+	jumpFrequency int64 // Jump every N steps. If <= 0, jumps are disabled.
 }
 
 // SavableIP defines the data for an IP that can be saved in a snapshot.
@@ -54,22 +56,28 @@ func (ip *IP) Savable() SavableIP {
 
 // NewIP creates a new, minimal instruction pointer.
 func NewIP(id int, soup []int32, startPtr int32) *IP {
-	return &IP{
-		ID:         id,
-		Soup:       soup,
-		CurrentPtr: startPtr,
+	ip := &IP{
+		ID:            id,
+		Soup:          soup,
+		CurrentPtr:    startPtr,
+		jumpFrequency: 1000, // Default value: jump every 1000 steps.
 	}
+	return ip
+}
+
+// SetJumpFrequency safely sets the jump frequency using atomic operations.
+func (ip *IP) SetJumpFrequency(newFreq int64) {
+	atomic.StoreInt64(&ip.jumpFrequency, newFreq)
 }
 
 // Step executes a single instruction from the soup.
 func (ip *IP) Step() {
 	soupLen := int32(len(ip.Soup))
 
-	// Jump to a random part of the soup
-	// NOTE make this based on a timer rather than steps to
-	// tie it to the parent universe (the physical machine)
-	if ip.Steps%100000 == 0 {
-		ip.CurrentPtr = int32(rand.Intn(len(ip.Soup)))
+	// Jump to a random part of the soup every N steps.
+	freq := atomic.LoadInt64(&ip.jumpFrequency)
+	if freq > 0 && ip.Steps%freq == 0 {
+		ip.CurrentPtr = rand.Int31n(soupLen)
 	}
 
 	// --- Helper Functions ---

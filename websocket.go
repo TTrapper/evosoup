@@ -47,14 +47,34 @@ func (c *Client) readPump() {
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
 
-	// The client-side application does not send messages, so this loop
-	// primarily serves to detect a client-initiated close.
+		// Handle incoming messages from the client.
 	for {
-		if _, _, err := c.conn.ReadMessage(); err != nil {
+		_, message, err := c.conn.ReadMessage()
+		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("error: %v", err)
 			}
-			break // Exit loop on error or client close
+			break
+		}
+
+		// We only expect JSON messages for controls.
+		var msg UIMessage
+		if err := json.Unmarshal(message, &msg); err != nil {
+			log.Printf("error unmarshalling message: %v", err)
+			continue
+		}
+
+		// Route the message based on its type.
+		switch msg.Type {
+		case "set_jump_rate":
+			// Safely send to the hub's channel.
+			select {
+			case c.hub.SetJumpRate <- msg.Value:
+			default:
+				log.Println("Jump rate channel is full, dropping message.")
+			}
+		default:
+			log.Printf("Unknown message type received: %s", msg.Type)
 		}
 	}
 }
@@ -97,10 +117,17 @@ func (c *Client) writePump() {
 
 // Hub maintains the set of active clients and broadcasts messages to them.
 type Hub struct {
-	clients    map[*Client]bool
-	Broadcast  chan []byte
-	Register   chan *Client
-	Unregister chan *Client
+	clients     map[*Client]bool
+	Broadcast   chan []byte
+	Register    chan *Client
+	Unregister  chan *Client
+	SetJumpRate chan float64 // Add this channel
+}
+
+// UIMessage defines the structure for incoming JSON messages from the UI.
+type UIMessage struct {
+	Type  string  `json:"type"`
+	Value float64 `json:"value"`
 }
 
 // GenerationStats is the data structure for stats sent to the front end.
@@ -115,10 +142,11 @@ type GenerationStats struct {
 // NewHub creates a new Hub object.
 func NewHub() *Hub {
 	return &Hub{
-		Broadcast:  make(chan []byte, 256),
-		Register:   make(chan *Client),
-		Unregister: make(chan *Client),
-		clients:    make(map[*Client]bool),
+		Broadcast:   make(chan []byte, 256),
+		Register:    make(chan *Client),
+		Unregister:  make(chan *Client),
+		clients:     make(map[*Client]bool),
+		SetJumpRate: make(chan float64, 8), // Initialize the channel
 	}
 }
 

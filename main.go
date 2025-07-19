@@ -180,5 +180,15 @@ func main() {
 		return true // continue iteration
 	})
 
-	wg.Wait()
+	// --- 5. Main Simulation Control Loop ---
+	for {
+		select {
+		case newFreq := <-hub.SetJumpRate:
+			population.Range(func(key, value interface{}) bool {
+				ip := value.(*vm.IP)
+				ip.SetJumpFrequency(int64(newFreq))
+				return true // continue iteration
+			})
+		}
+	}
 }
