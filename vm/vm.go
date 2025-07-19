@@ -1,11 +1,7 @@
 package vm
 
 import (
-	"context"
-	"encoding/binary"
-	"hash/fnv"
-	"sync"
-	"sync/atomic"
+	"math/rand"
 )
 
 // --- Constants ---
@@ -24,7 +20,6 @@ const (
 	JUMP_REL_IF_ZERO
 	READ_REL
 	WRITE_REL
-	SPAWN
 	NumOpcodes // This must be the last entry, it counts the number of opcodes
 )
 
@@ -37,41 +32,24 @@ var OpcodeNames = [...]string{
 	"JUMP_REL_IF_ZERO",
 	"READ_REL",
 	"WRITE_REL",
-	"SPAWN",
 }
 
 // IP represents an Instruction Pointer, our digital organism.
 // It holds its own registers and all the tools needed to spawn a child.
 type IP struct {
-	ID        int
-	Registers [NumRegisters]int32
-	Soup      []int32
-	Steps     int64 // Number of steps executed
-
-	// --- Spawning & Concurrency Tools ---
-	// These are pointers to the main simulation state.
-	Population *sync.Map
-	Wg         *sync.WaitGroup
-	NextIPID   *int32
-	Ctx        context.Context
-	RunIP      func(p *IP, ctx context.Context, wg *sync.WaitGroup)
-
-	// Counters for metrics
-	SpawnAttempt     int64
-	OpcodeCounts     [NumOpcodes]int64
-	SpawnedGenotypes []uint64 // To track the genotypes of spawned children
-
+	ID         int
+	Registers  [NumRegisters]int32
 	CurrentPtr int32 // Current instruction pointer in the soup
+	Steps      int64 // Number of steps executed
+	Soup       []int32
 }
 
 // SavableIP defines the data for an IP that can be saved in a snapshot.
 type SavableIP struct {
 	ID           int
-	CurrentPtr   int32
 	Registers    [NumRegisters]int32
+	CurrentPtr   int32
 	Steps        int64
-	SpawnAttempt int64
-	OpcodeCounts [NumOpcodes]int64
 }
 
 // Savable returns a serializable representation of the IP.
@@ -81,8 +59,6 @@ func (ip *IP) Savable() SavableIP {
 		CurrentPtr:   ip.CurrentPtr,
 		Registers:    ip.Registers,
 		Steps:        ip.Steps,
-		SpawnAttempt: ip.SpawnAttempt,
-		OpcodeCounts: ip.OpcodeCounts,
 	}
 }
 
@@ -93,15 +69,22 @@ func NewIP(id int, soup []int32, startPtr int32) *IP {
 		ID:               id,
 		Soup:             soup,
 		CurrentPtr:       startPtr,
-		SpawnedGenotypes: make([]uint64, 0),
 	}
 }
 
 // Step executes a single instruction from the soup.
 func (ip *IP) Step() {
-	soupLen := int32(len(ip.Soup))
-	// The pointer should always be valid at the start of a step due to the wrap at the end.
 
+	soupLen := int32(len(ip.Soup))
+
+	// Jump to a random part of the soup
+	// NOTE make this based on a timer rather than steps to
+	// tie it to the parent universe (the physical machine)
+	if (ip.Steps % 10000 == 0 ){
+		ip.CurrentPtr = int32(rand.Intn(len(ip.Soup)))
+	}
+
+	// The pointer should always be valid at the start of a step due to the wrap at the end.
 	// Helper function to safely read a value from the soup, handling pointer wrap.
 	safeReadSoup := func() int32 {
 		val := ip.Soup[(ip.CurrentPtr%soupLen+soupLen)%soupLen]
@@ -110,7 +93,6 @@ func (ip *IP) Step() {
 	}
 
 	opcode := (safeReadSoup()%int32(NumOpcodes) + int32(NumOpcodes)) % int32(NumOpcodes)
-	ip.OpcodeCounts[opcode]++
 	originalPtr := ip.CurrentPtr
 
 	// Helper function to safely read a register index from the soup.
@@ -160,43 +142,6 @@ func (ip *IP) Step() {
 		writeAddr := originalPtr + ip.Registers[regOffset]
 		writeAddr = (writeAddr%soupLen + soupLen) % soupLen // Wrap address
 		ip.Soup[writeAddr] = ip.Registers[regSrc]
-	case SPAWN:
-		// The IP is now fully autonomous in spawning.
-		ip.SpawnAttempt++
-		regOffset := safeRegIndex()
-		childStartPtr := originalPtr + ip.Registers[regOffset]
-		childStartPtr = (childStartPtr%soupLen + soupLen) % soupLen // Wrap address
-
-		// --- Genotype Snippet Hashing ---
-		snippet := make([]int32, GenomeSnippetSize)
-		for i := 0; i < GenomeSnippetSize; i++ {
-			snippet[i] = ip.Soup[(childStartPtr+int32(i))%soupLen]
-		}
-		hasher := fnv.New64a()
-		buf := make([]byte, 4)
-		for _, val := range snippet {
-			binary.LittleEndian.PutUint32(buf, uint32(val))
-			hasher.Write(buf)
-		}
-		genotypeHash := hasher.Sum64()
-		ip.SpawnedGenotypes = append(ip.SpawnedGenotypes, genotypeHash)
-		// --- End Hashing ---
-
-		// Generate the new child
-		newID := atomic.AddInt32(ip.NextIPID, 1)
-		child := NewIP(int(newID), ip.Soup, childStartPtr)
-
-		// Grant the child the same tools the parent has.
-		child.Population = ip.Population
-		child.Wg = ip.Wg
-		child.NextIPID = ip.NextIPID
-		child.RunIP = ip.RunIP
-		child.Ctx = ip.Ctx
-
-		// Add the child to the population and the WaitGroup, then launch it.
-		ip.Population.Store(child.ID, child)
-		ip.Wg.Add(1)
-		go ip.RunIP(child, ip.Ctx, ip.Wg)
 	}
 
 	// Wrap the final pointer to ensure it's always valid.

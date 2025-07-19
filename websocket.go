@@ -14,12 +14,6 @@ const (
 	// Time allowed to write a message to the peer.
 	writeWait = 10 * time.Second
 
-	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
-
-	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
-
 	// Maximum message size allowed from peer.
 	maxMessageSize = 512
 )
@@ -44,42 +38,39 @@ type Client struct {
 }
 
 // readPump pumps messages from the websocket connection to the hub.
-// This is run for each connection and ensures that there is at most one reader
-// on a connection.
+// In this high-throughput application, we don't need a read deadline.
+// A broken connection will be detected by a write failure in the writePump.
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.Unregister <- c
 		c.conn.Close()
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+
+	// The client-side application does not send messages, so this loop
+	// primarily serves to detect a client-initiated close.
 	for {
-		// The client-side application does not send messages, so this loop
-		// primarily serves to detect a closed connection.
-		_, _, err := c.conn.ReadMessage()
-		if err != nil {
+		if _, _, err := c.conn.ReadMessage(); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("error: %v", err)
 			}
-			break
+			break // Exit loop on error or client close
 		}
 	}
 }
 
 // writePump pumps messages from the hub to the websocket connection.
 // A goroutine running writePump is started for each connection. This is the
-// **only** place that should write to the connection, ensuring there are no
-// concurrent writes.
+// only place that should write to the connection.
 func (c *Client) writePump() {
-	ticker := time.NewTicker(pingPeriod)
 	defer func() {
-		ticker.Stop()
 		c.conn.Close()
 	}()
 	for {
 		select {
 		case message, ok := <-c.send:
+			// Set a deadline on the write. If the write blocks for too long,
+			// we assume the connection is dead.
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				// The hub closed the channel.
@@ -95,13 +86,9 @@ func (c *Client) writePump() {
 			}
 
 			if err := c.conn.WriteMessage(msgType, message); err != nil {
-				log.Printf("error writing to client: %v", err)
-				return
-			}
-
-		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				// An error writing the message (like a timeout) indicates a
+				// broken connection.
+				log.Printf("write error, closing connection: %v", err)
 				return
 			}
 		}
@@ -151,10 +138,10 @@ func (h *Hub) Run() {
 				select {
 				case client.send <- message:
 				default:
-					// If the client's send buffer is full, we assume it's
-					// lagging and close the connection.
-					close(client.send)
-					delete(h.clients, client)
+					// The client's send buffer is full. Instead of disconnecting,
+					// we just drop the message. The client will experience a
+					// stutter, but won't get stuck. A truly dead connection
+					// will be caught by the writePump's deadline.
 				}
 			}
 		}
