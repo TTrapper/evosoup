@@ -145,7 +145,7 @@
             if (typeof event.data === 'string') {
                 const stats = JSON.parse(event.data);
                 genSpan.textContent = stats.Generation;
-                stepsSpan.textContent = (stats.Steps / 1_000_000).toFixed(2) + "M";
+                stepsSpan.textContent = (stats.StepsPerSecond).toLocaleString(); // Update to show steps per second
                 entropySpan.textContent = stats.Entropy.toFixed(2);
             } else if (event.data instanceof ArrayBuffer) {
                 const colorIndices = new Uint8Array(event.data);

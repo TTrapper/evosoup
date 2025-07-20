@@ -36,12 +36,14 @@ type SimulationState struct {
 var (
 	globalJumpInterval int64
 	globalTimeElapsed  int64
+	globalSteps        int64
 )
 
 // runIP is the function that executes in each IP's goroutine.
 func runIP(p *vm.IP) {
 	for {
 		p.Step()
+		atomic.AddInt64(&globalSteps, 1)
 	}
 }
 
@@ -145,8 +147,12 @@ func main() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 
-    var frameIndex = 0
+		var frameIndex = 0
 		for range ticker.C {
+			// --- Calculate Steps Per Second ---
+			currentSteps := atomic.LoadInt64(&globalSteps)
+			atomic.StoreInt64(&globalSteps, 0) // Reset for the next second
+
 			// Soup Entropy
 			soupCounts := make(map[int32]int)
 			frameIndex++
@@ -161,10 +167,11 @@ func main() {
 				}
 			}
 			stats := GenerationStats{
-				Generation: frameIndex,
-				Population: InitialNumIPs,
-				Steps:      0,
-				Entropy:    soupEntropy,
+				Generation:     frameIndex,
+				Population:     InitialNumIPs,
+				Steps:          0, // We can probably remove this now
+				StepsPerSecond: currentSteps,
+				Entropy:        soupEntropy,
 			}
 			jsonData, err := json.Marshal(stats)
 			if err != nil {

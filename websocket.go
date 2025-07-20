@@ -132,11 +132,12 @@ type UIMessage struct {
 
 // GenerationStats is the data structure for stats sent to the front end.
 type GenerationStats struct {
-	Generation int     `json:"Generation"`
-	Population int     `json:"Population"`
-	Steps      int64   `json:"Steps"`
-	Spawns     int64   `json:"Spawns"`
-	Entropy    float64 `json:"Entropy"`
+	Generation     int     `json:"Generation"`
+	Population     int     `json:"Population"`
+	Steps          int64   `json:"Steps"`
+	StepsPerSecond int64   `json:"StepsPerSecond"`
+	Spawns         int64   `json:"Spawns"`
+	Entropy        float64 `json:"Entropy"`
 }
 
 // NewHub creates a new Hub object.
