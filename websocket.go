@@ -69,7 +69,7 @@ func (c *Client) readPump() {
 		case "set_jump_rate":
 			// Safely send to the hub's channel.
 			select {
-			case c.hub.SetJumpRate <- msg.Value:
+			case c.hub.SetJumpInterval <- msg.Value:
 			default:
 				log.Println("Jump rate channel is full, dropping message.")
 			}
@@ -121,7 +121,7 @@ type Hub struct {
 	Broadcast   chan []byte
 	Register    chan *Client
 	Unregister  chan *Client
-	SetJumpRate chan float64 // Add this channel
+	SetJumpInterval chan float64 // Add this channel
 }
 
 // UIMessage defines the structure for incoming JSON messages from the UI.
@@ -146,7 +146,7 @@ func NewHub() *Hub {
 		Register:    make(chan *Client),
 		Unregister:  make(chan *Client),
 		clients:     make(map[*Client]bool),
-		SetJumpRate: make(chan float64, 8), // Initialize the channel
+		SetJumpInterval: make(chan float64, 8), // Initialize the channel
 	}
 }
 

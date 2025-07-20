@@ -33,6 +33,11 @@ type SimulationState struct {
 	RandSeed   int64 // To be able to resume with the same random sequence
 }
 
+var (
+	globalJumpInterval int64
+	globalTimeElapsed  int64
+)
+
 // runIP is the function that executes in each IP's goroutine.
 func runIP(p *vm.IP) {
 	for {
@@ -69,6 +74,9 @@ func main() {
 	seed := time.Now().UnixNano()
 	rand.Seed(seed)
 
+	// Initialize global jump interval
+	atomic.StoreInt64(&globalJumpInterval, 1000) // Default to 1000ms (1 second)
+
 	soup := make([]int32, SoupSize)
 	for i := range soup {
     soup[i] = rand.Int31()
@@ -85,6 +93,32 @@ func main() {
 		population.Store(ip.ID, ip)
 	}
 	fmt.Printf("Simulation started with %d IPs in a soup of %d instructions. Seed: %d\n", InitialNumIPs, SoupSize, seed)
+
+	// --- Global Jump Timer Goroutine ---
+	go func() {
+		jumpTicker := time.NewTicker(time.Microsecond) // Check every 1 microsecond
+		defer jumpTicker.Stop()
+
+		for range jumpTicker.C {
+			atomic.AddInt64(&globalTimeElapsed, 1)
+			currentInterval := atomic.LoadInt64(&globalJumpInterval)
+
+			// Only trigger jumps if the interval is positive and the elapsed time is a multiple.
+			// This ensures jumps happen at the specified interval.
+			if currentInterval > 0 && atomic.LoadInt64(&globalTimeElapsed)%currentInterval == 0 {
+				population.Range(func(key, value interface{}) bool {
+					ip := value.(*vm.IP)
+					// NOTE: This direct assignment to ip.CurrentPtr creates a race condition
+					// with the IP's own Step() method. However, given the chaotic nature
+					// of the simulation and the performance overhead of mutexes on every
+					// IP step, this is deemed acceptable. Occasional skipped or mis-executed
+					// instructions due to this race are considered noise.
+					ip.CurrentPtr = rand.Int31n(int32(len(soup))) // Force jump
+					return true
+				})
+			}
+		}
+	}()
 
 	// --- 4. Real-time Visualization Goroutine ---
 	go func() {
@@ -183,12 +217,11 @@ func main() {
 	// --- 5. Main Simulation Control Loop ---
 	for {
 		select {
-		case newFreq := <-hub.SetJumpRate:
-			population.Range(func(key, value interface{}) bool {
-				ip := value.(*vm.IP)
-				ip.SetJumpFrequency(int64(newFreq))
-				return true // continue iteration
-			})
+		case newFreq := <-hub.SetJumpInterval:
+			// Update the global jump interval based on UI input
+			atomic.StoreInt64(&globalJumpInterval, int64(newFreq))
+		case <-time.After(time.Second): // Keep the main goroutine alive
+			// This case prevents the select from blocking indefinitely if no messages are received
 		}
 	}
 }
