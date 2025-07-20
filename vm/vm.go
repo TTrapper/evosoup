@@ -18,6 +18,13 @@ const (
 	ADD
 	SUB
 	JUMP_REL_IF_LT_ZERO
+	LOAD_CONST
+	AND
+	OR
+	XOR
+	NOT
+	SHL
+	SHR
 	NumOpcodes // This must be the last entry, it counts the number of opcodes
 )
 
@@ -27,6 +34,13 @@ var OpcodeNames = [...]string{
 	"ADD",
 	"SUB",
 	"JUMP_REL_IF_LT_ZERO",
+	"LOAD_CONST",
+	"AND",
+	"OR",
+	"XOR",
+	"NOT",
+	"SHL",
+	"SHR",
 }
 
 // IP represents an Instruction Pointer, our digital organism.
@@ -130,6 +144,39 @@ func (ip *IP) Step() {
 			// not the location of the offset operand.
 			ip.CurrentPtr = opcodeAddr + jumpOffset
 		}
+	case LOAD_CONST:
+		destAddr := getRelAddr()
+		val := safeRead()
+		ip.Soup[destAddr] = val
+	case AND:
+		destAddr := getRelAddr()
+		src1Addr := getRelAddr()
+		src2Addr := getRelAddr()
+		ip.Soup[destAddr] = ip.Soup[src1Addr] & ip.Soup[src2Addr]
+	case OR:
+		destAddr := getRelAddr()
+		src1Addr := getRelAddr()
+		src2Addr := getRelAddr()
+		ip.Soup[destAddr] = ip.Soup[src1Addr] | ip.Soup[src2Addr]
+	case XOR:
+		destAddr := getRelAddr()
+		src1Addr := getRelAddr()
+		src2Addr := getRelAddr()
+		ip.Soup[destAddr] = ip.Soup[src1Addr] ^ ip.Soup[src2Addr]
+	case NOT:
+		destAddr := getRelAddr()
+		srcAddr := getRelAddr()
+		ip.Soup[destAddr] = ^ip.Soup[srcAddr]
+	case SHL:
+		destAddr := getRelAddr()
+		srcAddr := getRelAddr()
+		shiftAmount := safeRead()
+		ip.Soup[destAddr] = ip.Soup[srcAddr] << uint(shiftAmount)
+	case SHR:
+		destAddr := getRelAddr()
+		srcAddr := getRelAddr()
+		shiftAmount := safeRead()
+		ip.Soup[destAddr] = ip.Soup[srcAddr] >> uint(shiftAmount)
 	}
 
 	ip.Steps++

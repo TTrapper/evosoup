@@ -42,6 +42,7 @@
         <p>Entropy: <span id="entropy">0.00</span></p>
         <label for="jumpRate">Rand Jump Freq: <span id="jumpRateValue">1000</span></label>
         <input type="range" id="jumpRate" min="0" max="100" step="1" value="50">
+        <div id="opcode-legend"></div>
     </div>
 
     <script>
@@ -55,12 +56,33 @@
         const offscreenCtx = offscreenCanvas.getContext('2d');
 
         const opcodeColors = [
-            [46, 46, 46, 255],    // 0: NOOP
-            [78, 154, 6, 255],    // 1: SET (DEPRECATED)
-            [52, 101, 164, 255],  // 2: COPY
-            [117, 80, 123, 255],  // 3: ADD
-            [204, 0, 0, 255],     // 4: SUB
-            [245, 121, 0, 255],   // 5: JUMP_REL_IF_LT_ZERO
+            [46, 46, 46, 255],    // 0: NOOP (Dark Gray)
+            [52, 101, 164, 255],  // 1: COPY (Blue)
+            [117, 80, 123, 255],  // 2: ADD (Purple-ish)
+            [204, 0, 0, 255],     // 3: SUB (Red)
+            [245, 121, 0, 255],   // 4: JUMP_REL_IF_LT_ZERO (Orange)
+            [255, 255, 0, 255],   // 5: LOAD_CONST (Yellow)
+            [0, 255, 255, 255],   // 6: AND (Cyan)
+            [255, 0, 255, 255],   // 7: OR (Magenta)
+            [128, 0, 128, 255],   // 8: XOR (Dark Purple)
+            [0, 128, 128, 255],   // 9: NOT (Teal)
+            [128, 128, 0, 255],   // 10: SHL (Olive)
+            [0, 0, 128, 255],     // 11: SHR (Navy)
+        ];
+
+        const opcodeNames = [
+            "NOOP",
+            "COPY",
+            "ADD",
+            "SUB",
+            "JUMP_REL_IF_LT_ZERO",
+            "LOAD_CONST",
+            "AND",
+            "OR",
+            "XOR",
+            "NOT",
+            "SHL",
+            "SHR",
         ];
 
         // --- Data Display & Controls ---
@@ -69,6 +91,18 @@
         const entropySpan = document.getElementById('entropy');
         const jumpRateSlider = document.getElementById('jumpRate');
         const jumpRateValueSpan = document.getElementById('jumpRateValue');
+        const opcodeLegendDiv = document.getElementById('opcode-legend');
+
+        // Generate opcode legend
+        opcodeNames.forEach((name, index) => {
+            const color = opcodeColors[index];
+            if (color) {
+                const colorBox = `<span style="display:inline-block; width:12px; height:12px; background-color:rgba(${color.join(',')}); border:1px solid #777; vertical-align:middle; margin-right:5px;"></span>`;
+                const legendItem = document.createElement('div');
+                legendItem.innerHTML = `${colorBox}${name}`;
+                opcodeLegendDiv.appendChild(legendItem);
+            }
+        });
 
         // --- View State ---
         let zoom = 1;
