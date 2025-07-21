@@ -274,8 +274,8 @@
         socket.onopen = function(event) {
             console.log("WebSocket connection established.");
             // Set initial jump rate on the server and UI
-            // Calculate initial slider value based on default frequency (1000)
-            const initialFreq = 1000; // This should match the default in vm/vm.go
+            // Calculate initial slider value based on default frequency (1)
+            const initialFreq = 1; // This should match the default in vm/vm.go
             jumpRateSlider.value = calculateSliderValue(initialFreq);
             jumpRateValueSpan.textContent = initialFreq;
             jumpRateSlider.dispatchEvent(new Event('input'));

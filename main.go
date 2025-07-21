@@ -4,6 +4,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"evolution/vm"
+	"flag"
 	"fmt"
 	"log"
 	"math"
@@ -18,15 +19,27 @@ import (
 const (
 	SoupSize              = 1024 * 1024
 	InitialNumIPs         = 8
-	GenerationTimeSeconds = 1
-	MinStepsPerGen        = 1   // Minimum steps to be considered "alive"
-	SnapshotInterval      = 100 // Save a snapshot every 100 generations
 	TargetFPS             = 30  // Target a smooth FPS
 
 	// StatsAndVisSize represents the portion of the soup used for statistics and
 	// visualization, corresponding to 1M instructions.
 	StatsAndVisSize = 1024 * 1024
+
+	// ExperimentDuration is the total time each experiment will run.
+	ExperimentDuration = 30 * time.Minute
 )
+
+// --- Structs ---
+
+// GenerationStats holds statistics for a single generation.
+type GenerationStats struct {
+	Generation     int     `json:"Generation"`
+	Population     int     `json:"Population"`
+	Steps          int64   `json:"Steps"`
+	StepsPerSecond int64   `json:"StepsPerSecond"`
+	Spawns         int64   `json:"Spawns"`
+	Entropy        float64 `json:"Entropy"`
+}
 
 // SimulationState represents the entire state of the simulation to be saved.
 type SimulationState struct {
@@ -43,12 +56,32 @@ var (
 	globalSteps        int64
 )
 
+// --- Core Simulation Logic ---
+
 // runIP is the function that executes in each IP's goroutine.
 func runIP(p *vm.IP) {
 	for {
 		p.Step()
 		atomic.AddInt64(&globalSteps, 1)
 	}
+}
+
+// --- Utility Functions ---
+
+// loadSnapshot loads a simulation state from a .gob file.
+func loadSnapshot(filename string) (SimulationState, error) {
+	var state SimulationState
+	file, err := os.Open(filename)
+	if err != nil {
+		return state, fmt.Errorf("failed to open snapshot file: %w", err)
+	}
+	defer file.Close()
+
+	decoder := gob.NewDecoder(file)
+	if err := decoder.Decode(&state); err != nil {
+		return state, fmt.Errorf("failed to decode snapshot: %w", err)
+	}
+	return state, nil
 }
 
 // saveSnapshot function
@@ -66,39 +99,94 @@ func saveSnapshot(state SimulationState, filename string) error {
 	return nil
 }
 
+// saveEntropies saves the entropy history to a CSV file.
+func saveEntropies(entropies []float64, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create entropy file: %w", err)
+	}
+	defer file.Close()
+
+	// Write header
+	_, err = file.WriteString("Generation,Entropy\n")
+	if err != nil {
+		return fmt.Errorf("failed to write header to entropy file: %w", err)
+	}
+
+	// Write entropies
+	for i, entropy := range entropies {
+		_, err = file.WriteString(fmt.Sprintf("%d,%f\n", i+1, entropy))
+		if err != nil {
+			return fmt.Errorf("failed to write to entropy file: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	fmt.Println("--- EvoSoup: A Go-based Artificial Life Simulation ---")
 
-	// 1. Create and run the WebSocket hub from our websocket.go file
+	// --- Command-line flags ---
+	snapshotFilename := flag.String("snapshot", "snapshot.gob", "Filename for the final snapshot.")
+	entropyFilename := flag.String("entropy", "entropies.csv", "Filename for the entropy history.")
+	loadFilename := flag.String("load", "", "Load a snapshot file to continue an experiment.")
+	flag.Parse()
+
+	// --- 1. Create and run the WebSocket hub ---
 	hub := NewHub()
 	go hub.Run()
 
-	// 2. Start the web server from our websocket.go file
+	// --- 2. Start the web server ---
 	go StartServer(hub)
 
 	// --- 3. Initialize Simulation ---
-	seed := time.Now().UnixNano()
-	rand.Seed(seed)
-
-	// Initialize global jump interval
-	atomic.StoreInt64(&globalJumpInterval, 1000) // Default to 1000ms (1 second)
-
-	soup := make([]int32, SoupSize)
-	for i := range soup {
-    soup[i] = rand.Int31()
-	}
-
+	var state SimulationState
+	var soup []int32
 	var population sync.Map
-	var nextIPID int32 = 0
+	var nextIPID int32
+	var seed int64
 
-	// Initial population.
-	for i := 0; i < InitialNumIPs; i++ {
-		startPtr := rand.Int31n(SoupSize)
-		newID := atomic.AddInt32(&nextIPID, 1)
-		ip := vm.NewIP(int(newID), soup, startPtr)
-		population.Store(ip.ID, ip)
+	if *loadFilename != "" {
+		// Load from snapshot
+		var err error
+		state, err = loadSnapshot(*loadFilename)
+		if err != nil {
+			log.Fatalf("Failed to load snapshot: %v", err)
+		}
+		soup = state.Soup
+		nextIPID = state.NextIPID
+		seed = state.RandSeed
+		rand.Seed(seed)
+
+		for _, savableIP := range state.IPs {
+			ip := vm.NewIP(savableIP.ID, soup, savableIP.CurrentPtr)
+			population.Store(ip.ID, ip)
+		}
+		fmt.Printf("Loaded snapshot: %s\n", *loadFilename)
+
+	} else {
+		// --- Initialize new simulation ---
+		seed = time.Now().UnixNano()
+		rand.Seed(seed)
+
+		// Initialize global jump interval
+		atomic.StoreInt64(&globalJumpInterval, 1) // Default to 1 microsecond
+
+		soup = make([]int32, SoupSize)
+		for i := range soup {
+			soup[i] = rand.Int31()
+		}
+
+		// Initial population.
+		for i := 0; i < InitialNumIPs; i++ {
+			startPtr := rand.Int31n(SoupSize)
+			newID := atomic.AddInt32(&nextIPID, 1)
+			ip := vm.NewIP(int(newID), soup, startPtr)
+			population.Store(ip.ID, ip)
+		}
+		fmt.Printf("Simulation started with %d IPs in a soup of %d instructions. Seed: %d\n", InitialNumIPs, SoupSize, seed)
 	}
-	fmt.Printf("Simulation started with %d IPs in a soup of %d instructions. Seed: %d\n", InitialNumIPs, SoupSize, seed)
 
 	// --- Global Jump Timer Goroutine ---
 	go func() {
@@ -147,46 +235,56 @@ func main() {
 	}()
 
 	// --- Statistics goroutine ---
+	var entropies []float64
+	statsDone := make(chan struct{})
 	go func() {
+		defer close(statsDone)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 
 		var frameIndex = 0
-		for range ticker.C {
-			// --- Calculate Steps Per Second ---
-			currentSteps := atomic.LoadInt64(&globalSteps)
-			atomic.StoreInt64(&globalSteps, 0) // Reset for the next second
+		for {
+			select {
+			case <-ticker.C:
+				// --- Calculate Steps Per Second ---
+				currentSteps := atomic.LoadInt64(&globalSteps)
+				atomic.StoreInt64(&globalSteps, 0) // Reset for the next second
 
-			// Soup Entropy
-			soupCounts := make(map[int32]int)
-			frameIndex++
-			for _, instr := range soup[:StatsAndVisSize] {
-				soupCounts[instr]++
-			}
-			var soupEntropy float64
-			for _, count := range soupCounts {
-				p := float64(count) / float64(StatsAndVisSize)
-				if p > 0 {
-					soupEntropy -= p * math.Log2(p)
+				// Soup Entropy
+				soupCounts := make(map[int32]int)
+				frameIndex++
+				for _, instr := range soup[:StatsAndVisSize] {
+					soupCounts[instr]++
 				}
-			}
-			stats := GenerationStats{
-				Generation:     frameIndex,
-				Population:     InitialNumIPs,
-				Steps:          0, // We can probably remove this now
-				StepsPerSecond: currentSteps,
-				Entropy:        soupEntropy,
-			}
-			jsonData, err := json.Marshal(stats)
-			if err != nil {
-				log.Printf("error marshalling json: %v", err)
-			} else {
-				hub.Broadcast <- jsonData
+				var soupEntropy float64
+				for _, count := range soupCounts {
+					p := float64(count) / float64(StatsAndVisSize)
+					if p > 0 {
+						soupEntropy -= p * math.Log2(p)
+					}
+				}
+				entropies = append(entropies, soupEntropy)
+				stats := GenerationStats{
+					Generation:     frameIndex,
+					Population:     InitialNumIPs, // This is a placeholder
+					Steps:          0,             // This is a placeholder
+					StepsPerSecond: currentSteps,
+					Spawns:         0, // This is a placeholder
+					Entropy:        soupEntropy,
+				}
+				jsonData, err := json.Marshal(stats)
+				if err != nil {
+					log.Printf("error marshalling json: %v", err)
+				} else {
+					hub.Broadcast <- jsonData
+				}
+			case <-time.After(ExperimentDuration):
+				return
 			}
 		}
 	}()
 
-  // --- Snapshotting goroutine ---
+	// --- Snapshotting goroutine ---
 	go func() {
 		ticker := time.NewTicker(time.Second * 600)
 		var nSaves = 0
@@ -206,11 +304,11 @@ func main() {
 				RandSeed:   seed,
 			}
 
-			snapshotFilename := "snapshot.gob"
-			if err := saveSnapshot(snapshotState, snapshotFilename); err != nil {
+			snapshotFilenameWithCount := fmt.Sprintf("%s_%d.gob", *snapshotFilename, nSaves)
+			if err := saveSnapshot(snapshotState, snapshotFilenameWithCount); err != nil {
 				fmt.Printf(" (Error saving snapshot: %v)\n", err)
 			} else {
-				fmt.Printf(" (Snapshot %d saved to %s)\n", nSaves, snapshotFilename)
+				fmt.Printf(" (Snapshot %d saved to %s)\n", nSaves, snapshotFilenameWithCount)
 			}
 		}
 	}()
@@ -226,13 +324,30 @@ func main() {
 	})
 
 	// --- 5. Main Simulation Control Loop ---
-	for {
-		select {
-		case newFreq := <-hub.SetJumpInterval:
-			// Update the global jump interval based on UI input
-			atomic.StoreInt64(&globalJumpInterval, int64(newFreq))
-		case <-time.After(time.Second): // Keep the main goroutine alive
-			// This case prevents the select from blocking indefinitely if no messages are received
-		}
+	<-time.After(ExperimentDuration)
+
+	// --- 6. Save final state and entropies ---
+	var savableIPs []vm.SavableIP
+	population.Range(func(key, value interface{}) bool {
+		ip := value.(*vm.IP)
+		savableIPs = append(savableIPs, ip.Savable())
+		return true
+	})
+
+	snapshotState := SimulationState{
+		Generation: 0, // Final state
+		Soup:       soup,
+		IPs:        savableIPs,
+		RandSeed:   seed,
 	}
+
+	if err := saveSnapshot(snapshotState, *snapshotFilename); err != nil {
+		log.Fatalf("failed to save final snapshot: %v", err)
+	}
+
+	if err := saveEntropies(entropies, *entropyFilename); err != nil {
+		log.Fatalf("failed to save entropies: %w", err)
+	}
+
+	fmt.Printf("--- Experiment finished. Snapshot and entropies saved.---\n")
 }
