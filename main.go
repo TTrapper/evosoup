@@ -35,9 +35,7 @@ const (
 type GenerationStats struct {
 	Generation     int     `json:"Generation"`
 	Population     int     `json:"Population"`
-	Steps          int64   `json:"Steps"`
 	StepsPerSecond int64   `json:"StepsPerSecond"`
-	Spawns         int64   `json:"Spawns"`
 	Entropy        float64 `json:"Entropy"`
 }
 
@@ -62,7 +60,6 @@ var (
 func runIP(p *vm.IP) {
 	for {
 		p.Step()
-		atomic.AddInt64(&globalSteps, 1)
 	}
 }
 
@@ -247,8 +244,13 @@ func main() {
 			select {
 			case <-ticker.C:
 				// --- Calculate Steps Per Second ---
-				currentSteps := atomic.LoadInt64(&globalSteps)
-				atomic.StoreInt64(&globalSteps, 0) // Reset for the next second
+				var totalSteps int64
+				population.Range(func(key, value interface{}) bool {
+					ip := value.(*vm.IP)
+					totalSteps += ip.Steps
+					return true
+				})
+				var stepsPerSecond = 1000000 * totalSteps / atomic.LoadInt64(&globalTimeElapsed)
 
 				// Soup Entropy
 				soupCounts := make(map[int32]int)
@@ -267,9 +269,7 @@ func main() {
 				stats := GenerationStats{
 					Generation:     frameIndex,
 					Population:     InitialNumIPs, // This is a placeholder
-					Steps:          0,             // This is a placeholder
-					StepsPerSecond: currentSteps,
-					Spawns:         0, // This is a placeholder
+					StepsPerSecond: stepsPerSecond,
 					Entropy:        soupEntropy,
 				}
 				jsonData, err := json.Marshal(stats)
