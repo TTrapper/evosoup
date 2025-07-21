@@ -22,6 +22,10 @@ const (
 	MinStepsPerGen        = 1   // Minimum steps to be considered "alive"
 	SnapshotInterval      = 100 // Save a snapshot every 100 generations
 	TargetFPS             = 30  // Target a smooth FPS
+
+	// StatsAndVisSize represents the portion of the soup used for statistics and
+	// visualization, corresponding to 1M instructions.
+	StatsAndVisSize = 1024 * 1024
 )
 
 // SimulationState represents the entire state of the simulation to be saved.
@@ -127,12 +131,12 @@ func main() {
 		ticker := time.NewTicker(time.Second / TargetFPS)
 		defer ticker.Stop()
 
-		colorIndices := make([]byte, SoupSize)
+		colorIndices := make([]byte, StatsAndVisSize)
 		numColors := int32(vm.NumOpcodes) // The number of opcodes/colors you have
 
 		for range ticker.C {
 			// Create the color index map from the current soup state
-			for i, val := range soup {
+			for i, val := range soup[:StatsAndVisSize] {
 				colorIndex := (val%numColors + numColors) % numColors
 				colorIndices[i] = byte(colorIndex)
 			}
@@ -156,12 +160,12 @@ func main() {
 			// Soup Entropy
 			soupCounts := make(map[int32]int)
 			frameIndex++
-			for _, instr := range soup {
+			for _, instr := range soup[:StatsAndVisSize] {
 				soupCounts[instr]++
 			}
 			var soupEntropy float64
 			for _, count := range soupCounts {
-				p := float64(count) / float64(SoupSize)
+				p := float64(count) / float64(StatsAndVisSize)
 				if p > 0 {
 					soupEntropy -= p * math.Log2(p)
 				}
