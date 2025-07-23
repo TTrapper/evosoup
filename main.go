@@ -17,7 +17,7 @@ import (
 
 // --- Simulation Constants ---
 const (
-	SoupSize              = 1024 * 1024
+	SoupSize              = 1024 * 1024 * 8
 	InitialNumIPs         = 8
 	TargetFPS             = 30  // Target a smooth FPS
 
@@ -42,7 +42,7 @@ type GenerationStats struct {
 // SimulationState represents the entire state of the simulation to be saved.
 type SimulationState struct {
 	Generation int
-	Soup       []int32
+	Soup       []int8
 	IPs        []vm.SavableIP
 	NextIPID   int32
 	RandSeed   int64 // To be able to resume with the same random sequence
@@ -139,7 +139,7 @@ func main() {
 
 	// --- 3. Initialize Simulation ---
 	var state SimulationState
-	var soup []int32
+	var soup []int8
 	var population sync.Map
 	var nextIPID int32
 	var seed int64
@@ -170,9 +170,9 @@ func main() {
 		// Initialize global jump interval
 		atomic.StoreInt64(&globalJumpInterval, 1) // Default to 1 microsecond
 
-		soup = make([]int32, SoupSize)
+		soup = make([]int8, SoupSize)
 		for i := range soup {
-			soup[i] = rand.Int31()
+			soup[i] = int8(rand.Intn(256) - 128)
 		}
 
 		// Initial population.
@@ -222,7 +222,7 @@ func main() {
 		for range ticker.C {
 			// Create the color index map from the current soup state
 			for i, val := range soup[:StatsAndVisSize] {
-				colorIndex := (val%numColors + numColors) % numColors
+				colorIndex := (int32(val)%numColors + numColors) % numColors
 				colorIndices[i] = byte(colorIndex)
 			}
 
@@ -256,7 +256,7 @@ func main() {
 				soupCounts := make(map[int32]int)
 				frameIndex++
 				for _, instr := range soup[:StatsAndVisSize] {
-					soupCounts[instr]++
+					soupCounts[int32(instr)]++
 				}
 				var soupEntropy float64
 				for _, count := range soupCounts {

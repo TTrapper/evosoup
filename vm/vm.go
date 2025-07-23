@@ -1,5 +1,6 @@
 package vm
 
+
 // --- Constants ---
 const (
 	NumRegisters      = 4
@@ -13,13 +14,11 @@ const (
 	ADD
 	SUB
 	JUMP_REL_IF_LT_ZERO
-	LOAD_CONST
+	WRITE_CONST
 	AND
 	OR
 	XOR
 	NOT
-	SHL
-	SHR
 	NumOpcodes // This must be the last entry, it counts the number of opcodes
 )
 
@@ -29,13 +28,11 @@ var OpcodeNames = [...]string{
 	"ADD",
 	"SUB",
 	"JUMP_REL_IF_LT_ZERO",
-	"LOAD_CONST",
+	"WRITE_CONST",
 	"AND",
 	"OR",
 	"XOR",
 	"NOT",
-	"SHL",
-	"SHR",
 }
 
 // IP represents an Instruction Pointer, our digital organism.
@@ -43,7 +40,7 @@ type IP struct {
 	ID            int
 	CurrentPtr    int32 // Current instruction pointer in the soup
 	Steps         int64 // Number of steps executed
-	Soup          []int32
+	Soup          []int8
 }
 
 // SavableIP defines the data for an IP that can be saved in a snapshot.
@@ -63,7 +60,7 @@ func (ip *IP) Savable() SavableIP {
 }
 
 // NewIP creates a new, minimal instruction pointer.
-func NewIP(id int, soup []int32, startPtr int32) *IP {
+func NewIP(id int, soup []int8, startPtr int32) *IP {
 	ip := &IP{
 		ID:            id,
 		Soup:          soup,
@@ -83,7 +80,7 @@ func (ip *IP) Step() {
 	}
 
 	// Reads the value at the CurrentPtr and increments the pointer.
-	safeRead := func() int32 {
+	safeRead := func() int8 {
 		val := ip.Soup[wrapAddr(ip.CurrentPtr)]
 		ip.CurrentPtr++
 		return val
@@ -94,12 +91,12 @@ func (ip *IP) Step() {
 	getRelAddr := func() int32 {
 		currentAddr := wrapAddr(ip.CurrentPtr)
 		offsetVal := safeRead()
-		return wrapAddr(currentAddr + offsetVal)
+		return wrapAddr(currentAddr + int32(offsetVal))
 	}
 
 	// --- Instruction Execution ---
 	opcodeAddr := wrapAddr(ip.CurrentPtr)
-	opcode := (safeRead() % int32(NumOpcodes) + int32(NumOpcodes)) % int32(NumOpcodes)
+	opcode := (int32(safeRead())%int32(NumOpcodes) + int32(NumOpcodes)) % int32(NumOpcodes)
 
 	switch byte(opcode) {
 	case NOOP:
@@ -124,9 +121,9 @@ func (ip *IP) Step() {
 		if ip.Soup[condAddr] < 0 {
 			// The jump is relative to the JUMP instruction's location (opcodeAddr),
 			// not the location of the offset operand.
-			ip.CurrentPtr = opcodeAddr + jumpOffset
+			ip.CurrentPtr = opcodeAddr + int32(jumpOffset)
 		}
-	case LOAD_CONST:
+	case WRITE_CONST:
 		destAddr := getRelAddr()
 		val := safeRead()
 		ip.Soup[destAddr] = val
@@ -149,17 +146,6 @@ func (ip *IP) Step() {
 		destAddr := getRelAddr()
 		srcAddr := getRelAddr()
 		ip.Soup[destAddr] = ^ip.Soup[srcAddr]
-	case SHL:
-		destAddr := getRelAddr()
-		srcAddr := getRelAddr()
-		shiftAmount := safeRead()
-		ip.Soup[destAddr] = ip.Soup[srcAddr] << uint(shiftAmount)
-	case SHR:
-		destAddr := getRelAddr()
-		srcAddr := getRelAddr()
-		shiftAmount := safeRead()
-		ip.Soup[destAddr] = ip.Soup[srcAddr] >> uint(shiftAmount)
 	}
-
 	ip.Steps++
 }
