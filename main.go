@@ -25,8 +25,6 @@ const (
 	// visualization, corresponding to 1M instructions.
 	StatsAndVisSize = 1024 * 1024
 
-	// ExperimentDuration is the total time each experiment will run.
-	ExperimentDuration = 30 * time.Minute
 )
 
 // --- Structs ---
@@ -128,6 +126,7 @@ func main() {
 	snapshotFilename := flag.String("snapshot", "snapshot.gob", "Filename for the final snapshot.")
 	entropyFilename := flag.String("entropy", "entropies.csv", "Filename for the entropy history.")
 	loadFilename := flag.String("load", "", "Load a snapshot file to continue an experiment.")
+	experimentDuration := flag.Int("duration", -1, "Time in minutes to run an experiment. Negative values run forever")
 	flag.Parse()
 
 	// --- 1. Create and run the WebSocket hub ---
@@ -278,8 +277,6 @@ func main() {
 				} else {
 					hub.Broadcast <- jsonData
 				}
-			case <-time.After(ExperimentDuration):
-				return
 			}
 		}
 	}()
@@ -324,7 +321,11 @@ func main() {
 	})
 
 	// --- 5. Main Simulation Control Loop ---
-	<-time.After(ExperimentDuration)
+	if *experimentDuration < 0 {
+		fmt.Printf("Negative experiment duration provided, running forever.")
+		for {}
+	}
+	<-time.After(time.Duration(*experimentDuration) * time.Minute)
 
 	// --- 6. Save final state and entropies ---
 	var savableIPs []vm.SavableIP

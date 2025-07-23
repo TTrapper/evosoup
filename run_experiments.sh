@@ -5,9 +5,9 @@ do
   echo "--- Starting Experiment $i ---"
   if [ -f "experiment_${i}_snapshot.gob" ]; then
     echo "--- Continuing Experiment $i from snapshot ---"
-    go run . -load "experiment_${i}_snapshot.gob" -snapshot "experiment_${i}_run_2_snapshot.gob" -entropy "experiment_${i}_run_2_entropies.csv"
+    go run . -load "experiment_${i}_snapshot.gob" -snapshot "experiment_${i}_run_2_snapshot.gob" -entropy "experiment_${i}_run_2_entropies.csv" -duration 30
   else
-    go run . -snapshot "experiment_${i}_snapshot.gob" -entropy "experiment_${i}_entropies.csv"
+    go run . -snapshot "experiment_${i}_snapshot.gob" -entropy "experiment_${i}_entropies.csv" -duration 30
   fi
   echo "--- Experiment $i finished ---"
 done
