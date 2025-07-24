@@ -1,70 +1,91 @@
 package vm
 
+import "encoding/binary"
 
-// --- Constants ---
-const (
-	NumRegisters      = 4
-	GenomeSnippetSize = 32
-)
+// --- Configuration ---
+
+// USE_32_BIT_ADDRESSING controls the size of address-related operands.
+// Set to true for 4-byte (int32) addresses.
+// Set to false for 1-byte (int8) addresses.
+const USE_32_BIT_ADDRESSING = false
+
+// USE_RELATIVE_ADDRESSING controls how the AddressRegister is interpreted.
+// Set to true: AddressRegister is an offset from the current instruction's location.
+// Set to false: AddressRegister is an absolute memory address.
+const USE_RELATIVE_ADDRESSING = true
 
 // --- Instruction Set Opcodes ---
 const (
 	NOOP byte = iota
-	COPY
 	ADD
 	SUB
 	JUMP_REL_IF_LT_ZERO
-	WRITE_CONST
 	AND
 	OR
 	XOR
 	NOT
+	LOAD_VAL_FROM_ADDR
+	LOAD_ADDR_FROM_ADDR
+	LOAD_VAL_IMMEDIATE
+	LOAD_ADDR_IMMEDIATE
+	WRITE_VAL_TO_ADDR
 	NumOpcodes // This must be the last entry, it counts the number of opcodes
 )
 
 var OpcodeNames = [...]string{
 	"NOOP",
-	"COPY",
 	"ADD",
 	"SUB",
 	"JUMP_REL_IF_LT_ZERO",
-	"WRITE_CONST",
 	"AND",
 	"OR",
 	"XOR",
 	"NOT",
+	"LOAD_VAL_FROM_ADDR",
+	"LOAD_ADDR_FROM_ADDR",
+	"LOAD_VAL_IMMEDIATE",
+	"LOAD_ADDR_IMMEDIATE",
+	"WRITE_VAL_TO_ADDR",
 }
 
 // IP represents an Instruction Pointer, our digital organism.
 type IP struct {
-	ID            int
-	CurrentPtr    int32 // Current instruction pointer in the soup
-	Steps         int64 // Number of steps executed
-	Soup          []int8
+	ID              int
+	CurrentPtr      int32 // Current instruction pointer in the soup
+	Steps           int64 // Number of steps executed
+	Soup            []int8
+	ValueRegister   int8
+	AddressRegister int32
 }
 
 // SavableIP defines the data for an IP that can be saved in a snapshot.
 type SavableIP struct {
-	ID         int
-	CurrentPtr int32
-	Steps      int64
+	ID              int
+	CurrentPtr      int32
+	Steps           int64
+	ValueRegister   int8
+	AddressRegister int32
 }
 
 // Savable returns a serializable representation of the IP.
 func (ip *IP) Savable() SavableIP {
 	return SavableIP{
-		ID:         ip.ID,
-		CurrentPtr: ip.CurrentPtr,
-		Steps:      ip.Steps,
+		ID:              ip.ID,
+		CurrentPtr:      ip.CurrentPtr,
+		Steps:           ip.Steps,
+		ValueRegister:   ip.ValueRegister,
+		AddressRegister: ip.AddressRegister,
 	}
 }
 
 // NewIP creates a new, minimal instruction pointer.
 func NewIP(id int, soup []int8, startPtr int32) *IP {
 	ip := &IP{
-		ID:            id,
-		Soup:          soup,
-		CurrentPtr:    startPtr,
+		ID:              id,
+		Soup:            soup,
+		CurrentPtr:      startPtr,
+		ValueRegister:   0,
+		AddressRegister: 0,
 	}
 	return ip
 }
@@ -74,78 +95,94 @@ func (ip *IP) Step() {
 	soupLen := int32(len(ip.Soup))
 
 	// --- Helper Functions ---
-	// Wraps an address to the valid range of the soup.
 	wrapAddr := func(addr int32) int32 {
 		return (addr%soupLen + soupLen) % soupLen
 	}
 
-	// Reads the value at the CurrentPtr and increments the pointer.
-	safeRead := func() int8 {
+	// Fetches 1 byte from the instruction stream and advances the pointer.
+	fetch8 := func() int8 {
 		val := ip.Soup[wrapAddr(ip.CurrentPtr)]
-		ip.CurrentPtr++
+		ip.CurrentPtr = wrapAddr(ip.CurrentPtr + 1)
 		return val
 	}
 
-	// Reads an offset value and returns the final, absolute, wrapped address
-	// calculated relative to the location of the offset value itself.
-	getRelAddr := func() int32 {
-		currentAddr := wrapAddr(ip.CurrentPtr)
-		offsetVal := safeRead()
-		return wrapAddr(currentAddr + int32(offsetVal))
+	// Fetches 4 bytes from the instruction stream and advances the pointer.
+	fetch32 := func() int32 {
+		var val int32
+		val = int32(fetch8()) << 24
+		val |= int32(fetch8()) << 16
+		val |= int32(fetch8()) << 8
+		val |= int32(fetch8())
+		return val
+	}
+
+	// Fetches an immediate operand from the instruction stream.
+	fetchImmediate := func() int32 {
+		if USE_32_BIT_ADDRESSING {
+			return fetch32()
+		} else {
+			return int32(fetch8())
+		}
+	}
+
+	// Reads 1 or 4 bytes from a specified memory address (does not advance CurrentPtr).
+	readAtAddr := func(addr int32) int32 {
+		if USE_32_BIT_ADDRESSING {
+			var bs = make([]byte, 4)
+			for i := 0; i < 4; i++ {
+				bs[i] = byte(ip.Soup[wrapAddr(addr+int32(i))])
+			}
+			return int32(binary.LittleEndian.Uint32(bs))
+		} else {
+			return int32(ip.Soup[wrapAddr(addr)])
+		}
+	}
+
+	// Calculates the final address for an operation based on the addressing mode.
+	resolveDataAddress := func(opcodeLocation int32) int32 {
+		if USE_RELATIVE_ADDRESSING {
+			return wrapAddr(opcodeLocation + ip.AddressRegister)
+		} else {
+			return wrapAddr(ip.AddressRegister)
+		}
 	}
 
 	// --- Instruction Execution ---
-	opcodeAddr := wrapAddr(ip.CurrentPtr)
-	opcode := (int32(safeRead())%int32(NumOpcodes) + int32(NumOpcodes)) % int32(NumOpcodes)
+	opcodeLocation := ip.CurrentPtr
+	opcode := (int32(fetch8())%int32(NumOpcodes) + int32(NumOpcodes)) % int32(NumOpcodes)
+
+	// Pre-calculate the address for any instruction that needs it.
+	dataAddr := resolveDataAddress(opcodeLocation)
 
 	switch byte(opcode) {
 	case NOOP:
-		// PC was already incremented by safeRead.
-	case COPY:
-		destAddr := getRelAddr()
-		srcAddr := getRelAddr()
-		ip.Soup[destAddr] = ip.Soup[srcAddr]
 	case ADD:
-		destAddr := getRelAddr()
-		src1Addr := getRelAddr()
-		src2Addr := getRelAddr()
-		ip.Soup[destAddr] = ip.Soup[src1Addr] + ip.Soup[src2Addr]
+		ip.ValueRegister += ip.Soup[dataAddr]
 	case SUB:
-		destAddr := getRelAddr()
-		src1Addr := getRelAddr()
-		src2Addr := getRelAddr()
-		ip.Soup[destAddr] = ip.Soup[src1Addr] - ip.Soup[src2Addr]
+		ip.ValueRegister -= ip.Soup[dataAddr]
 	case JUMP_REL_IF_LT_ZERO:
-		condAddr := getRelAddr()
-		jumpOffset := safeRead()
-		if ip.Soup[condAddr] < 0 {
-			// The jump is relative to the JUMP instruction's location (opcodeAddr),
-			// not the location of the offset operand.
-			ip.CurrentPtr = opcodeAddr + int32(jumpOffset)
+		jumpOffset := ip.AddressRegister
+		if ip.ValueRegister < 0 {
+			ip.CurrentPtr = opcodeLocation + jumpOffset
 		}
-	case WRITE_CONST:
-		destAddr := getRelAddr()
-		val := safeRead()
-		ip.Soup[destAddr] = val
 	case AND:
-		destAddr := getRelAddr()
-		src1Addr := getRelAddr()
-		src2Addr := getRelAddr()
-		ip.Soup[destAddr] = ip.Soup[src1Addr] & ip.Soup[src2Addr]
+		ip.ValueRegister &= ip.Soup[dataAddr]
 	case OR:
-		destAddr := getRelAddr()
-		src1Addr := getRelAddr()
-		src2Addr := getRelAddr()
-		ip.Soup[destAddr] = ip.Soup[src1Addr] | ip.Soup[src2Addr]
+		ip.ValueRegister |= ip.Soup[dataAddr]
 	case XOR:
-		destAddr := getRelAddr()
-		src1Addr := getRelAddr()
-		src2Addr := getRelAddr()
-		ip.Soup[destAddr] = ip.Soup[src1Addr] ^ ip.Soup[src2Addr]
+		ip.ValueRegister ^= ip.Soup[dataAddr]
 	case NOT:
-		destAddr := getRelAddr()
-		srcAddr := getRelAddr()
-		ip.Soup[destAddr] = ^ip.Soup[srcAddr]
+		ip.ValueRegister = ^ip.ValueRegister
+	case LOAD_VAL_FROM_ADDR:
+		ip.ValueRegister = ip.Soup[dataAddr]
+	case LOAD_ADDR_FROM_ADDR:
+		ip.AddressRegister = readAtAddr(dataAddr)
+	case LOAD_VAL_IMMEDIATE:
+		ip.ValueRegister = int8(fetchImmediate())
+	case LOAD_ADDR_IMMEDIATE:
+		ip.AddressRegister = fetchImmediate()
+	case WRITE_VAL_TO_ADDR:
+		ip.Soup[dataAddr] = ip.ValueRegister
 	}
 	ip.Steps++
 }

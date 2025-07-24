@@ -203,7 +203,9 @@ func main() {
 					// of the simulation and the performance overhead of mutexes on every
 					// IP step, this is deemed acceptable. Occasional skipped or mis-executed
 					// instructions due to this race are considered noise.
-					ip.CurrentPtr = rand.Int31n(int32(len(soup))) // Force jump
+//					ip.CurrentPtr = rand.Int31n(int32(len(soup))) // Force jump
+					ip.ValueRegister = int8(rand.Intn(256) - 128)
+					ip.AddressRegister = int32(rand.Intn(256) - 128)
 					return true
 				})
 			}
@@ -300,8 +302,12 @@ func main() {
 				IPs:        savableIPs,
 				RandSeed:   seed,
 			}
-
-			snapshotFilenameWithCount := fmt.Sprintf("%s_%d.gob", *snapshotFilename, nSaves)
+			var snapshotFilenameWithCount = ""
+			if *experimentDuration < 0 {
+				snapshotFilenameWithCount = fmt.Sprintf("%s_%d.gob", *snapshotFilename, 0)
+			} else {
+				snapshotFilenameWithCount = fmt.Sprintf("%s_%d.gob", *snapshotFilename, nSaves)
+			}
 			if err := saveSnapshot(snapshotState, snapshotFilenameWithCount); err != nil {
 				fmt.Printf(" (Error saving snapshot: %v)\n", err)
 			} else {

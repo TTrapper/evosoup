@@ -56,33 +56,35 @@
         const offscreenCtx = offscreenCanvas.getContext('2d');
 
         const opcodeColors = [
-            [46, 46, 46, 255],    // 0: NOOP (Dark Gray)
-            [52, 101, 164, 255],  // 1: COPY (Blue)
-            [117, 80, 123, 255],  // 2: ADD (Purple-ish)
-            [204, 0, 0, 255],     // 3: SUB (Red)
-            [245, 121, 0, 255],   // 4: JUMP_REL_IF_LT_ZERO (Orange)
-            [0, 255, 0, 255],     // 5: WRITE_CONST (Green)
-            [0, 255, 255, 255],   // 6: AND (Cyan)
-            [255, 0, 255, 255],   // 7: OR (Magenta)
-            [128, 0, 128, 255],   // 8: XOR (Dark Purple)
-            [0, 128, 128, 255],   // 9: NOT (Teal)
-            [128, 128, 0, 255],   // 10: SHL (Olive)
-            [0, 0, 128, 255],     // 11: SHR (Navy)
+            [46, 46, 46, 255],      // 0: NOOP (Dark Gray)
+            [117, 80, 123, 255],    // 1: ADD (Purple-ish)
+            [204, 0, 0, 255],       // 2: SUB (Red)
+            [245, 121, 0, 255],     // 3: JUMP_REL_IF_LT_ZERO (Orange)
+            [0, 255, 255, 255],     // 4: AND (Cyan)
+            [255, 0, 255, 255],     // 5: OR (Magenta)
+            [128, 0, 128, 255],     // 6: XOR (Dark Purple)
+            [0, 128, 128, 255],     // 7: NOT (Teal)
+            [52, 101, 164, 255],    // 8: LOAD_VAL_FROM_ADDR (Blue)
+            [196, 160, 0, 255],     // 9: LOAD_ADDR_FROM_ADDR (Yellow)
+            [78, 154, 6, 255],      // 10: LOAD_VAL_IMMEDIATE (Green)
+            [164, 0, 0, 255],       // 11: LOAD_ADDR_IMMEDIATE (Dark Red)
+            [255, 255, 255, 255],   // 12: WRITE_VAL_TO_ADDR (White)
         ];
 
         const opcodeNames = [
             "NOOP",
-            "COPY",
             "ADD",
             "SUB",
             "JUMP_REL_IF_LT_ZERO",
-            "WRITE_CONST",
             "AND",
             "OR",
             "XOR",
             "NOT",
-            "SHL",
-            "SHR",
+            "LOAD_VAL_FROM_ADDR",
+            "LOAD_ADDR_FROM_ADDR",
+            "LOAD_VAL_IMMEDIATE",
+            "LOAD_ADDR_IMMEDIATE",
+            "WRITE_VAL_TO_ADDR",
         ];
 
         // --- Data Display & Controls ---
