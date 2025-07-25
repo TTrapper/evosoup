@@ -29,6 +29,30 @@
             border: 1px solid #555;
         }
         label { display: block; margin-bottom: 5px; }
+        #controls-buttons button {
+            margin-right: 5px;
+            padding: 8px 12px;
+            background-color: #555;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        #controls-buttons button:hover {
+            background-color: #777;
+        }
+        #paging-buttons button {
+            margin-right: 5px;
+            padding: 8px 12px;
+            background-color: #555;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        #paging-buttons button:hover {
+            background-color: #777;
+        }
     </style>
 </head>
 <body>
@@ -42,6 +66,15 @@
         <p>Entropy: <span id="entropy">0.00</span></p>
         <label for="jumpRate">Jump Interval (μs): <span id="jumpRateValue">1000</span></label>
         <input type="range" id="jumpRate" min="0" max="100" step="1" value="50">
+        <div id="controls-buttons">
+            <button id="pauseButton">Pause</button>
+            <button id="resumeButton">Resume</button>
+            <button id="stepButton">Step</button>
+        </div>
+        <div id="paging-buttons">
+            <button id="prevPage">Previous Page</button>
+            <button id="nextPage">Next Page</button>
+        </div>
         <div id="opcode-legend"></div>
     </div>
 
@@ -269,6 +302,55 @@
             }
         });
         
+        // --- Command Buttons ---
+        const pauseButton = document.getElementById('pauseButton');
+        const resumeButton = document.getElementById('resumeButton');
+        const stepButton = document.getElementById('stepButton');
+
+        const prevPageButton = document.getElementById('prevPage');
+        const nextPageButton = document.getElementById('nextPage');
+
+        const StatsAndVisSize = 1024 * 1024; // Must match the Go constant
+        let currentViewStartIndex = 0;
+
+        function sendCommand(command) {
+            const message = {
+                type: "command",
+                command: command
+            };
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(message));
+            }
+        }
+
+        function sendViewStartIndex(index) {
+            const message = {
+                type: "set_view_start_index",
+                value: index
+            };
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(message));
+            }
+        }
+
+        pauseButton.addEventListener('click', () => sendCommand('pause'));
+        resumeButton.addEventListener('click', () => sendCommand('resume'));
+        stepButton.addEventListener('click', () => sendCommand('step'));
+
+        prevPageButton.addEventListener('click', () => {
+            currentViewStartIndex -= StatsAndVisSize;
+            if (currentViewStartIndex < 0) {
+                currentViewStartIndex = 0;
+            }
+            sendViewStartIndex(currentViewStartIndex);
+        });
+
+        nextPageButton.addEventListener('click', () => {
+            currentViewStartIndex += StatsAndVisSize;
+            // We don't have SoupSize on the client, so we'll let the server clamp it.
+            sendViewStartIndex(currentViewStartIndex);
+        });
+
         // Resize Observer
         new ResizeObserver(draw).observe(canvasContainer);
 

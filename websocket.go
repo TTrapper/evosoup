@@ -29,6 +29,7 @@ var upgrader = websocket.Upgrader{
 // Client is a middleman between the websocket connection and the hub.
 type Client struct {
 	hub *Hub
+	appState *AppState
 
 	// The websocket connection.
 	conn *websocket.Conn
@@ -73,6 +74,19 @@ func (c *Client) readPump() {
 			default:
 				log.Println("Jump rate channel is full, dropping message.")
 			}
+		case "command":
+			switch msg.Command {
+			case "pause":
+				c.appState.Pause()
+			case "resume":
+				c.appState.Resume()
+			case "step":
+				c.appState.Step()
+			default:
+				log.Printf("Unknown command received: %s", msg.Command)
+			}
+		case "set_view_start_index":
+			c.appState.SetViewStartIndex(int(msg.Value))
 		default:
 			log.Printf("Unknown message type received: %s", msg.Type)
 		}
@@ -104,7 +118,6 @@ func (c *Client) writePump() {
 			} else {
 				msgType = websocket.BinaryMessage
 			}
-
 			if err := c.conn.WriteMessage(msgType, message); err != nil {
 				// An error writing the message (like a timeout) indicates a
 				// broken connection.
@@ -121,13 +134,15 @@ type Hub struct {
 	Broadcast   chan []byte
 	Register    chan *Client
 	Unregister  chan *Client
-	SetJumpInterval chan float64 // Add this channel
+	SetJumpInterval chan float64
+	Pause       chan bool
 }
 
 // UIMessage defines the structure for incoming JSON messages from the UI.
 type UIMessage struct {
-	Type  string  `json:"type"`
-	Value float64 `json:"value"`
+	Type    string  `json:"type"`
+	Value   float64 `json:"value"`
+	Command string  `json:"command"`
 }
 
 
@@ -138,7 +153,8 @@ func NewHub() *Hub {
 		Register:    make(chan *Client),
 		Unregister:  make(chan *Client),
 		clients:     make(map[*Client]bool),
-		SetJumpInterval: make(chan float64, 8), // Initialize the channel
+		SetJumpInterval: make(chan float64, 8),
+		Pause:       make(chan bool, 8),
 	}
 }
 
@@ -169,13 +185,13 @@ func (h *Hub) Run() {
 }
 
 // handleWebSocket upgrades HTTP connections to WebSocket connections and creates a Client.
-func handleWebSocket(hub *Hub, w http.ResponseWriter, r *http.Request) {
+func handleWebSocket(hub *Hub, appState *AppState, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("Upgrade error:", err)
 		return
 	}
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
+	client := &Client{hub: hub, appState: appState, conn: conn, send: make(chan []byte, 256)}
 	client.hub.Register <- client
 
 	// Allow collection of memory referenced by the caller by doing all work in
@@ -194,9 +210,9 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // StartServer initializes HTTP routes and starts the web server.
-func StartServer(hub *Hub) {
+func StartServer(hub *Hub, appState *AppState) {
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWebSocket(hub, w, r)
+		handleWebSocket(hub, appState, w, r)
 	})
 	http.HandleFunc("/", serveIndex)
 
