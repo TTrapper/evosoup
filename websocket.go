@@ -87,6 +87,10 @@ func (c *Client) readPump() {
 			}
 		case "set_view_start_index":
 			c.appState.SetViewStartIndex(int(msg.Value))
+		case "set_32_bit_addressing":
+			c.appState.Set32BitAddressing(msg.Value == 1)
+		case "set_relative_addressing":
+			c.appState.SetRelativeAddressing(msg.Value == 1)
 		default:
 			log.Printf("Unknown message type received: %s", msg.Type)
 		}

@@ -53,6 +53,9 @@
         #paging-buttons button:hover {
             background-color: #777;
         }
+        #addressing-modes label {
+            margin-right: 10px;
+        }
     </style>
 </head>
 <body>
@@ -74,6 +77,10 @@
         <div id="paging-buttons">
             <button id="prevPage">Previous Page</button>
             <button id="nextPage">Next Page</button>
+        </div>
+        <div id="addressing-modes">
+            <label><input type="checkbox" id="32BitAddressing"> 32-bit Addressing</label>
+            <label><input type="checkbox" id="relativeAddressing" checked> Relative Addressing</label>
         </div>
         <div id="opcode-legend"></div>
     </div>
@@ -310,6 +317,9 @@
         const prevPageButton = document.getElementById('prevPage');
         const nextPageButton = document.getElementById('nextPage');
 
+        const bit32AddressingCheckbox = document.getElementById('32BitAddressing');
+        const relativeAddressingCheckbox = document.getElementById('relativeAddressing');
+
         const StatsAndVisSize = 1024 * 1024; // Must match the Go constant
         let currentViewStartIndex = 0;
 
@@ -333,6 +343,16 @@
             }
         }
 
+        function sendAddressingMode(type, enabled) {
+            const message = {
+                type: type,
+                value: enabled ? 1 : 0
+            };
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(message));
+            }
+        }
+
         pauseButton.addEventListener('click', () => sendCommand('pause'));
         resumeButton.addEventListener('click', () => sendCommand('resume'));
         stepButton.addEventListener('click', () => sendCommand('step'));
@@ -349,6 +369,14 @@
             currentViewStartIndex += StatsAndVisSize;
             // We don't have SoupSize on the client, so we'll let the server clamp it.
             sendViewStartIndex(currentViewStartIndex);
+        });
+
+        bit32AddressingCheckbox.addEventListener('change', (event) => {
+            sendAddressingMode('set_32_bit_addressing', event.target.checked);
+        });
+
+        relativeAddressingCheckbox.addEventListener('change', (event) => {
+            sendAddressingMode('set_relative_addressing', event.target.checked);
         });
 
         // Resize Observer

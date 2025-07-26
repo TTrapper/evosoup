@@ -4,15 +4,7 @@ import "encoding/binary"
 
 // --- Configuration ---
 
-// USE_32_BIT_ADDRESSING controls the size of address-related operands.
-// Set to true for 4-byte (int32) addresses.
-// Set to false for 1-byte (int8) addresses.
-const USE_32_BIT_ADDRESSING = false
 
-// USE_RELATIVE_ADDRESSING controls how the AddressRegister is interpreted.
-// Set to true: AddressRegister is an offset from the current instruction's location.
-// Set to false: AddressRegister is an absolute memory address.
-const USE_RELATIVE_ADDRESSING = true
 
 // --- Instruction Set Opcodes ---
 const (
@@ -50,12 +42,14 @@ var OpcodeNames = [...]string{
 
 // IP represents an Instruction Pointer, our digital organism.
 type IP struct {
-	ID              int
-	CurrentPtr      int32 // Current instruction pointer in the soup
-	Steps           int64 // Number of steps executed
-	Soup            []int8
-	ValueRegister   int8
-	AddressRegister int32
+	ID                  int
+	CurrentPtr          int32 // Current instruction pointer in the soup
+	Steps               int64 // Number of steps executed
+	Soup                []int8
+	ValueRegister       int8
+	AddressRegister     int32
+	Use32BitAddressing  bool
+	UseRelativeAddressing bool
 }
 
 // SavableIP defines the data for an IP that can be saved in a snapshot.
@@ -79,13 +73,15 @@ func (ip *IP) Savable() SavableIP {
 }
 
 // NewIP creates a new, minimal instruction pointer.
-func NewIP(id int, soup []int8, startPtr int32) *IP {
+func NewIP(id int, soup []int8, startPtr int32, use32BitAddressing bool, useRelativeAddressing bool) *IP {
 	ip := &IP{
-		ID:              id,
-		Soup:            soup,
-		CurrentPtr:      startPtr,
-		ValueRegister:   0,
-		AddressRegister: 0,
+		ID:                  id,
+		Soup:                soup,
+		CurrentPtr:          startPtr,
+		ValueRegister:       0,
+		AddressRegister:     0,
+		Use32BitAddressing:  use32BitAddressing,
+		UseRelativeAddressing: useRelativeAddressing,
 	}
 	return ip
 }
@@ -118,7 +114,7 @@ func (ip *IP) Step() {
 
 	// Fetches an immediate operand from the instruction stream.
 	fetchImmediate := func() int32 {
-		if USE_32_BIT_ADDRESSING {
+		if ip.Use32BitAddressing {
 			return fetch32()
 		} else {
 			return int32(fetch8())
@@ -127,7 +123,7 @@ func (ip *IP) Step() {
 
 	// Reads 1 or 4 bytes from a specified memory address (does not advance CurrentPtr).
 	readAtAddr := func(addr int32) int32 {
-		if USE_32_BIT_ADDRESSING {
+		if ip.Use32BitAddressing {
 			var bs = make([]byte, 4)
 			for i := 0; i < 4; i++ {
 				bs[i] = byte(ip.Soup[wrapAddr(addr+int32(i))])
@@ -140,7 +136,7 @@ func (ip *IP) Step() {
 
 	// Calculates the final address for an operation based on the addressing mode.
 	resolveDataAddress := func(opcodeLocation int32) int32 {
-		if USE_RELATIVE_ADDRESSING {
+		if ip.UseRelativeAddressing {
 			return wrapAddr(opcodeLocation + ip.AddressRegister)
 		} else {
 			return wrapAddr(ip.AddressRegister)

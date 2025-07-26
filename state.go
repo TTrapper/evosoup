@@ -27,10 +27,12 @@ type AppState struct {
 	timeElapsed int64 // In microseconds
 
 	// Control state
-	jumpInterval int64
-	ipCount      int32
-	paused       int32 // Atomic boolean: 0 for running, 1 for paused
-	singleStep   int32 // Atomic boolean: 0 for normal, 1 for single-step
+	jumpInterval        int64
+	ipCount             int32
+	paused              int32 // Atomic boolean: 0 for running, 1 for paused
+	singleStep          int32 // Atomic boolean: 0 for normal, 1 for single-step
+	Use32BitAddressing  bool
+	UseRelativeAddressing bool
 
 	// Visualization state
 	viewStartIndex int
@@ -40,10 +42,12 @@ type AppState struct {
 // NewAppState initializes a new simulation state.
 func NewAppState() *AppState {
 	return &AppState{
-		soup:           make([]int8, SoupSize),
-		jumpInterval:   1, // Default jump interval
-		viewStartIndex: 0,
-		viewEndIndex:   StatsAndVisSize,
+		soup:                  make([]int8, SoupSize),
+		jumpInterval:          1, // Default jump interval
+		viewStartIndex:        0,
+		viewEndIndex:          StatsAndVisSize,
+		Use32BitAddressing:    false, // Default from vm/vm.go
+		UseRelativeAddressing: true,  // Default from vm/vm.go
 	}
 }
 
@@ -75,7 +79,7 @@ func (s *AppState) loadSnapshot(filename string) error {
 	atomic.StoreInt32(&s.ipCount, 0)
 
 	for _, savableIP := range state.IPs {
-		ip := vm.NewIP(savableIP.ID, s.soup, savableIP.CurrentPtr)
+		ip := vm.NewIP(savableIP.ID, s.soup, savableIP.CurrentPtr, s.Use32BitAddressing, s.UseRelativeAddressing)
 		s.population.Store(ip.ID, ip)
 		atomic.AddInt32(&s.ipCount, 1)
 	}
@@ -125,7 +129,7 @@ func (s *AppState) initializeSimulation() {
 	for i := 0; i < InitialNumIPs; i++ {
 		startPtr := rand.Int31n(SoupSize)
 		newID := atomic.AddInt32(&s.nextIPID, 1)
-		ip := vm.NewIP(int(newID), s.soup, startPtr)
+		ip := vm.NewIP(int(newID), s.soup, startPtr, s.Use32BitAddressing, s.UseRelativeAddressing)
 		s.population.Store(ip.ID, ip)
 		atomic.AddInt32(&s.ipCount, 1)
 	}
@@ -212,6 +216,26 @@ func (s *AppState) SetViewStartIndex(index int) {
 	}
 	s.viewStartIndex = index
 	s.viewEndIndex = s.viewStartIndex + StatsAndVisSize
+}
+
+// SetRelativeAddressing sets the relative addressing mode.
+func (s *AppState) SetRelativeAddressing(enabled bool) {
+	s.UseRelativeAddressing = enabled
+	s.population.Range(func(key, value interface{}) bool {
+		ip := value.(*vm.IP)
+		ip.UseRelativeAddressing = enabled
+		return true
+	})
+}
+
+// Set32BitAddressing sets the 32-bit addressing mode.
+func (s *AppState) Set32BitAddressing(enabled bool) {
+	s.Use32BitAddressing = enabled
+	s.population.Range(func(key, value interface{}) bool {
+		ip := value.(*vm.IP)
+		ip.Use32BitAddressing = enabled
+		return true
+	})
 }
 
 // RunVisualization manages the real-time visualization.
