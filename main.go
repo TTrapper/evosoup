@@ -83,6 +83,9 @@ func main() {
 
 	go appState.RunStatistics(hub)
 
+	// --- IP State Broadcaster Goroutine ---
+	go appState.RunIPStateBroadcaster(hub)
+
 	// --- Snapshotting goroutine ---
 	go func() {
 		ticker := time.NewTicker(time.Second * 600)

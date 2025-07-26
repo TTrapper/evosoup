@@ -37,6 +37,10 @@ type AppState struct {
 	// Visualization state
 	viewStartIndex int
 	viewEndIndex   int
+
+	// IP Tracking
+	trackingEnabled bool
+	ipStateChan chan vm.SavableIP
 }
 
 // NewAppState initializes a new simulation state.
@@ -48,6 +52,8 @@ func NewAppState() *AppState {
 		viewEndIndex:          StatsAndVisSize,
 		Use32BitAddressing:    false, // Default from vm/vm.go
 		UseRelativeAddressing: true,  // Default from vm/vm.go
+		trackingEnabled:       false,
+		ipStateChan:           make(chan vm.SavableIP, 100), // Buffered channel for IP state updates
 	}
 }
 
@@ -92,7 +98,7 @@ func (s *AppState) saveSnapshot(filename string) error {
 	var savableIPs []vm.SavableIP
 	s.population.Range(func(key, value interface{}) bool {
 		ip := value.(*vm.IP)
-		savableIPs = append(savableIPs, ip.Savable())
+		savableIPs = append(savableIPs, ip.CurrentState())
 		return true
 	})
 
@@ -148,8 +154,26 @@ func (s *AppState) runIP(p *vm.IP) {
 
 		// If in single-step mode, pause after one step
 		if atomic.LoadInt32(&s.singleStep) == 1 {
+			// Send IP state if tracking is enabled and this is the first IP
+			if s.trackingEnabled && p.ID == 1 {
+				log.Printf("Sending IP state for tracked IP %d", p.ID)
+				s.ipStateChan <- p.CurrentState()
+			}
 			atomic.StoreInt32(&s.paused, 1)
 			atomic.StoreInt32(&s.singleStep, 0) // Consume the single step
+		}
+	}
+}
+
+// RunIPStateBroadcaster sends the tracked IP's state to the UI.
+func (s *AppState) RunIPStateBroadcaster(hub *Hub) {
+	for ipState := range s.ipStateChan {
+		log.Printf("Broadcasting IP state for IP %d", ipState.ID)
+		jsonData, err := json.Marshal(ipState)
+		if err != nil {
+			log.Printf("error marshalling IP state: %v", err)
+		} else {
+			hub.Broadcast <- jsonData
 		}
 	}
 }
@@ -194,19 +218,38 @@ func (s *AppState) runJumpTimer() {
 
 // Pause sets the paused state of the simulation.
 func (s *AppState) Pause() {
+	log.Println("Pausing simulation")
 	atomic.StoreInt32(&s.paused, 1)
 }
 
 // Resume sets the paused state of the simulation to false.
 func (s *AppState) Resume() {
+	log.Println("Resuming simulation")
 	atomic.StoreInt32(&s.paused, 0)
 }
 
 // Step advances the simulation by one step if it is paused.
 func (s *AppState) Step() {
+	log.Println("Stepping simulation")
 	if atomic.LoadInt32(&s.paused) == 1 {
-		atomic.StoreInt32(&s.singleStep, 1)
-		atomic.StoreInt32(&s.paused, 0) // Allow one step to execute
+		// If tracking is enabled, step only the first IP
+		if s.trackingEnabled {
+			if val, ok := s.population.Load(1); ok { // Always track IP with ID 1
+				ip := val.(*vm.IP)
+				ip.Step() // Execute one step for the tracked IP
+				log.Printf("Stepped tracked IP %d. Sending state.", ip.ID)
+				s.ipStateChan <- ip.CurrentState() // Send its state
+			} else {
+				log.Printf("Tracked IP with ID 1 not found.")
+			}
+		} else {
+			log.Println("Step command received, but IP tracking is not enabled.")
+		}
+		// Keep the simulation paused after the step
+		atomic.StoreInt32(&s.paused, 1)
+		atomic.StoreInt32(&s.singleStep, 0) // Ensure singleStep is reset
+	} else {
+		log.Println("Step command received, but simulation is not paused.")
 	}
 }
 
@@ -240,6 +283,29 @@ func (s *AppState) Set32BitAddressing(enabled bool) {
 		ip.Use32BitAddressing = enabled
 		return true
 	})
+}
+
+
+
+// SetTrackingEnabled sets the tracking state of the first IP.
+func (s *AppState) SetTrackingEnabled(enabled bool) {
+	s.trackingEnabled = enabled
+	if enabled {
+		log.Println("IP tracking enabled.")
+	} else {
+		log.Println("IP tracking disabled.")
+	}
+}
+
+// SetIPPtr sets the CurrentPtr of a specific IP.
+func (s *AppState) SetIPPtr(id int, ptr int32) {
+	if val, ok := s.population.Load(id); ok {
+		ip := val.(*vm.IP)
+		ip.CurrentPtr = ptr
+		log.Printf("Set IP %d CurrentPtr to %d", id, ptr)
+	} else {
+		log.Printf("IP with ID %d not found to set pointer.", id)
+	}
 }
 
 // RunVisualization manages the real-time visualization.

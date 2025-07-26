@@ -68,6 +68,7 @@ func (c *Client) readPump() {
 		// Route the message based on its type.
 		switch msg.Type {
 		case "set_jump_rate":
+			log.Printf("Received set_jump_rate: %f", msg.Value)
 			// Safely send to the hub's channel.
 			select {
 			case c.hub.SetJumpInterval <- msg.Value:
@@ -75,6 +76,7 @@ func (c *Client) readPump() {
 				log.Println("Jump rate channel is full, dropping message.")
 			}
 		case "command":
+			log.Printf("Received command: %s", msg.Command)
 			switch msg.Command {
 			case "pause":
 				c.appState.Pause()
@@ -86,11 +88,20 @@ func (c *Client) readPump() {
 				log.Printf("Unknown command received: %s", msg.Command)
 			}
 		case "set_view_start_index":
+			log.Printf("Received set_view_start_index: %d", int(msg.Value))
 			c.appState.SetViewStartIndex(int(msg.Value))
 		case "set_32_bit_addressing":
+			log.Printf("Received set_32_bit_addressing: %t", msg.Value == 1)
 			c.appState.Set32BitAddressing(msg.Value == 1)
 		case "set_relative_addressing":
+			log.Printf("Received set_relative_addressing: %t", msg.Value == 1)
 			c.appState.SetRelativeAddressing(msg.Value == 1)
+		case "set_tracking_enabled":
+			log.Printf("Received set_tracking_enabled: %t", msg.Value == 1)
+			c.appState.SetTrackingEnabled(msg.Value == 1)
+		case "set_ip_ptr":
+			log.Printf("Received set_ip_ptr for IP %d to %d", msg.ID, msg.Ptr)
+			c.appState.SetIPPtr(msg.ID, msg.Ptr)
 		default:
 			log.Printf("Unknown message type received: %s", msg.Type)
 		}
@@ -147,6 +158,8 @@ type UIMessage struct {
 	Type    string  `json:"type"`
 	Value   float64 `json:"value"`
 	Command string  `json:"command"`
+	ID      int     `json:"id"`  // For IP tracking commands
+	Ptr     int32   `json:"ptr"` // For setting IP pointer
 }
 
 

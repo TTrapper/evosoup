@@ -59,16 +59,22 @@ type SavableIP struct {
 	Steps           int64
 	ValueRegister   int8
 	AddressRegister int32
+	CurrentInstruction int8 // The raw instruction byte at CurrentPtr
 }
 
 // Savable returns a serializable representation of the IP.
-func (ip *IP) Savable() SavableIP {
+func (ip *IP) CurrentState() SavableIP {
+	// Ensure CurrentPtr is within bounds for accessing Soup
+	soupLen := int32(len(ip.Soup))
+	wrappedCurrentPtr := (ip.CurrentPtr%soupLen + soupLen) % soupLen
+
 	return SavableIP{
-		ID:              ip.ID,
-		CurrentPtr:      ip.CurrentPtr,
-		Steps:           ip.Steps,
-		ValueRegister:   ip.ValueRegister,
-		AddressRegister: ip.AddressRegister,
+		ID:                 ip.ID,
+		CurrentPtr:         ip.CurrentPtr,
+		Steps:              ip.Steps,
+		ValueRegister:      ip.ValueRegister,
+		AddressRegister:    ip.AddressRegister,
+		CurrentInstruction: ip.Soup[wrappedCurrentPtr],
 	}
 }
 

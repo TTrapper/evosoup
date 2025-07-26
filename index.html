@@ -56,6 +56,30 @@
         #addressing-modes label {
             margin-right: 10px;
         }
+
+        #trackedIpState p {
+            margin: 5px 0;
+        }
+        #right-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 300px; /* Adjust as needed */
+            background-color: rgba(46, 46, 46, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #555;
+            color: #d3d3d3;
+        }
+        #right-panel h2,
+        #right-panel h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #eee;
+        }
+        #right-panel p {
+            margin: 5px 0;
+        }
     </style>
 </head>
 <body>
@@ -72,7 +96,6 @@
         <div id="controls-buttons">
             <button id="pauseButton">Pause</button>
             <button id="resumeButton">Resume</button>
-            <button id="stepButton">Step</button>
         </div>
         <div id="paging-buttons">
             <button id="prevPage">Previous Page</button>
@@ -83,6 +106,20 @@
             <label><input type="checkbox" id="relativeAddressing" checked> Relative Addressing</label>
         </div>
         <div id="opcode-legend"></div>
+    </div>
+
+    <div id="right-panel" style="display: none;">
+        <h2>Tracked IP State</h2>
+        <div id="trackedIpState">
+            <p>ID: <span id="trackedIpId">-</span></p>
+            <p>Current Ptr: <span id="trackedIpCurrentPtr">-</span></p>
+            <p>Value Reg: <span id="trackedIpValueReg">-</span></p>
+            <p>Address Reg: <span id="trackedIpAddressReg">-</span></p>
+            <p>Instruction: <span id="trackedIpInstruction">-</span></p>
+            <button id="stepButton">Step</button>
+        </div>
+        <h3>Instruction History</h3>
+        <div id="instructionHistory" style="max-height: 200px; overflow-y: scroll; border: 1px solid #555; padding: 5px;"></div>
     </div>
 
     <script>
@@ -155,6 +192,8 @@
         let lastMouseY = 0;
         let soupWidth = 0;
         let soupHeight = 0;
+        let isDragging = false; // New flag to detect dragging
+        let highlightedIpPtr = -1; // Tracked IP pointer for highlighting
 
         // --- WebSocket Connection ---
         const socket = new WebSocket('ws://localhost:8080/ws');
@@ -180,15 +219,66 @@
             ctx.translate(offsetX, offsetY);
             ctx.scale(zoom, zoom);
             ctx.drawImage(offscreenCanvas, 0, 0);
+
+            // Highlight tracked IP
+            if (highlightedIpPtr !== -1 && soupWidth > 0) {
+                const relativePtr = highlightedIpPtr - currentViewStartIndex;
+                if (relativePtr >= 0 && relativePtr < (soupWidth * soupHeight)) {
+                    const pixelX = relativePtr % soupWidth;
+                    const pixelY = Math.floor(relativePtr / soupWidth);
+
+                    ctx.strokeStyle = 'yellow';
+                    ctx.lineWidth = 2 / zoom; // Adjust line width to scale with zoom
+                    ctx.strokeRect(pixelX, pixelY, 1, 1); // Draw 1x1 rectangle, which will be scaled by context.zoom
+                }
+            }
+
             ctx.restore();
         }
 
         socket.onmessage = function(event) {
             if (typeof event.data === 'string') {
-                const stats = JSON.parse(event.data);
-                genSpan.textContent = stats.Generation;
-                stepsSpan.textContent = (stats.StepsPerSecond).toLocaleString(); // Update to show steps per second
-                entropySpan.textContent = stats.Entropy.toFixed(2);
+                const data = JSON.parse(event.data);
+                if (data.Generation !== undefined) {
+                    // It's GenerationStats
+                    genSpan.textContent = data.Generation;
+                    stepsSpan.textContent = (data.StepsPerSecond).toLocaleString();
+                    entropySpan.textContent = data.Entropy.toFixed(2);
+                } else if (data.ID !== undefined) {
+                    // It's an IP state update (SavableIP)
+                    trackedIpIdSpan.textContent = data.ID;
+                    trackedIpCurrentPtrSpan.textContent = "0x" + data.CurrentPtr.toString(16);
+                    trackedIpValueRegSpan.textContent = "0x" + data.ValueRegister.toString(16);
+                    trackedIpAddressRegSpan.textContent = "0x" + data.AddressRegister.toString(16);
+
+                    highlightedIpPtr = data.CurrentPtr; // Update highlighted IP pointer
+
+                    // Display instruction name and color
+                    const instructionValue = data.CurrentInstruction;
+                    const colorIndex = (instructionValue % opcodeColors.length + opcodeColors.length) % opcodeColors.length;
+                    const color = opcodeColors[colorIndex];
+                    const instructionName = opcodeNames[colorIndex];
+
+                    trackedIpInstructionSpan.innerHTML = ``; // Clear previous content
+                    const colorBox = document.createElement('span');
+                    colorBox.style.display = 'inline-block';
+                    colorBox.style.width = '12px';
+                    colorBox.style.height = '12px';
+                    colorBox.style.backgroundColor = `rgba(${color.join(',')})`;
+                    colorBox.style.border = '1px solid #777';
+                    colorBox.style.verticalAlign = 'middle';
+                    colorBox.style.marginRight = '5px';
+                    trackedIpInstructionSpan.appendChild(colorBox);
+                    trackedIpInstructionSpan.append(instructionName);
+
+                    // Add to instruction history
+                    const historyItem = document.createElement('div');
+                    historyItem.textContent = `ID: ${data.ID}, Ptr: 0x${data.CurrentPtr.toString(16)}, Val: 0x${data.ValueRegister.toString(16)}, Addr: 0x${data.AddressRegister.toString(16)}, Instr: ${instructionName}`;
+                    instructionHistoryDiv.prepend(historyItem); // Add to the top
+                    if (instructionHistoryDiv.children.length > 50) { // Limit history to 50 items
+                        instructionHistoryDiv.removeChild(instructionHistoryDiv.lastChild);
+                    }
+                }
             } else if (event.data instanceof ArrayBuffer) {
                 const colorIndices = new Uint8Array(event.data);
                 const soupSize = colorIndices.length;
@@ -225,6 +315,7 @@
         // Pan
         canvasContainer.addEventListener('mousedown', (e) => {
             isPanning = true;
+            isDragging = false; // Assume not dragging initially
             canvasContainer.style.cursor = 'grabbing';
             lastMouseX = e.clientX;
             lastMouseY = e.clientY;
@@ -244,11 +335,42 @@
             if (!isPanning) return;
             const dx = e.clientX - lastMouseX;
             const dy = e.clientY - lastMouseY;
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) { // Consider it a drag if moved more than 5 pixels
+                isDragging = true;
+            }
             offsetX += dx;
             offsetY += dy;
             lastMouseX = e.clientX;
             lastMouseY = e.clientY;
             requestAnimationFrame(draw);
+        });
+
+        // Click to set IP pointer
+        canvas.addEventListener('click', (e) => {
+            if (isDragging) { // Don't set IP if it was a drag
+                isDragging = false; // Reset for next click
+                return;
+            }
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Convert canvas coordinates to soup coordinates
+            const soupX = Math.floor((x - offsetX) / zoom);
+            const soupY = Math.floor((y - offsetY) / zoom);
+
+            // Calculate the absolute soup address
+            const soupAddress = currentViewStartIndex + (soupY * soupWidth) + soupX;
+
+            // Send the command to the server for IP ID 1
+            const message = {
+                type: "set_ip_ptr",
+                id: 1, // Hardcoded for the first IP
+                ptr: soupAddress
+            };
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(message));
+            }
         });
 
         // Zoom
@@ -320,8 +442,24 @@
         const bit32AddressingCheckbox = document.getElementById('32BitAddressing');
         const relativeAddressingCheckbox = document.getElementById('relativeAddressing');
 
+        const rightPanel = document.getElementById('right-panel');
+        const trackedIpIdSpan = document.getElementById('trackedIpId');
+        const trackedIpCurrentPtrSpan = document.getElementById('trackedIpCurrentPtr');
+        const trackedIpValueRegSpan = document.getElementById('trackedIpValueReg');
+        const trackedIpAddressRegSpan = document.getElementById('trackedIpAddressReg');
+        const trackedIpInstructionSpan = document.getElementById('trackedIpInstruction');
+        const instructionHistoryDiv = document.getElementById('instructionHistory');
+
         const StatsAndVisSize = 1024 * 1024; // Must match the Go constant
         let currentViewStartIndex = 0;
+
+        function showRightPanel() {
+            rightPanel.style.display = 'block';
+        }
+
+        function hideRightPanel() {
+            rightPanel.style.display = 'none';
+        }
 
         function sendCommand(command) {
             const message = {
@@ -353,8 +491,27 @@
             }
         }
 
-        pauseButton.addEventListener('click', () => sendCommand('pause'));
-        resumeButton.addEventListener('click', () => sendCommand('resume'));
+        function sendTrackingEnabled(enabled) {
+            const message = {
+                type: "set_tracking_enabled",
+                value: enabled ? 1 : 0
+            };
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(message));
+            }
+        }
+
+        pauseButton.addEventListener('click', () => {
+            sendCommand('pause');
+            showRightPanel();
+            sendTrackingEnabled(true); // Enable tracking when paused
+        });
+        resumeButton.addEventListener('click', () => {
+            sendCommand('resume');
+            hideRightPanel();
+            sendTrackingEnabled(false); // Disable tracking when resumed
+            highlightedIpPtr = -1; // Clear highlight
+        });
         stepButton.addEventListener('click', () => sendCommand('step'));
 
         prevPageButton.addEventListener('click', () => {
@@ -382,6 +539,12 @@
         // Resize Observer
         new ResizeObserver(draw).observe(canvasContainer);
 
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && rightPanel.style.display === 'block') {
+                stepButton.click();
+            }
+        });
 
         socket.onopen = function(event) {
             console.log("WebSocket connection established.");
