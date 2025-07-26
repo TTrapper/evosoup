@@ -174,6 +174,10 @@ func (s *AppState) runJumpTimer() {
 	defer jumpTicker.Stop()
 
 	for range jumpTicker.C {
+		if atomic.LoadInt32(&s.paused) == 1 {
+			time.Sleep(100 * time.Millisecond) // Prevent busy-waiting
+			continue
+		}
 		atomic.AddInt64(&s.timeElapsed, 1)
 		currentInterval := atomic.LoadInt64(&s.jumpInterval)
 
@@ -276,6 +280,10 @@ func (s *AppState) RunStatistics(hub *Hub) {
 
 	var frameIndex = 0
 	for {
+		if atomic.LoadInt32(&s.paused) == 1 {
+			time.Sleep(100 * time.Millisecond) // Prevent busy-waiting
+			continue
+		}
 		select {
 		case <-ticker.C:
 			// --- Calculate Steps Per Second ---
