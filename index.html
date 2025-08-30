@@ -105,6 +105,10 @@
             <label><input type="checkbox" id="32BitAddressing"> 32-bit Addressing</label>
             <label><input type="checkbox" id="relativeAddressing" checked> Relative Addressing</label>
         </div>
+        <div id="view-mode-controls">
+            <label><input type="radio" name="viewMode" value="opcode" checked> Opcodes</label>
+            <label><input type="radio" name="viewMode" value="heatmap"> Heatmap</label>
+        </div>
         <div id="opcode-legend"></div>
     </div>
 
@@ -147,6 +151,50 @@
             "NOOP", "MOV", "WRT", "INC", "DEC", "XOR", "SHF", "INV", "JMP_Z"
         ];
 
+        function getHeatmapColor(value) { // value from -128 to 127
+            let r = 0, g = 0, b = 0;
+            if (value > 0) {
+                // Positive values: red
+                r = Math.floor(255 * (value / 127.0));
+            } else if (value < 0) {
+                // Negative values: blue
+                b = Math.floor(255 * (Math.abs(value) / 128.0));
+            }
+            return [r, g, b, 255]; // Return with alpha
+        }
+
+        function renderSoup() {
+            if (!lastColorIndices) return;
+
+            const soupSize = lastColorIndices.length;
+            if (soupWidth * soupHeight !== soupSize) {
+                 console.error("Size mismatch");
+                 return;
+            }
+
+            for (let i = 0; i < soupSize; i++) {
+                const byteValue = lastColorIndices[i];
+                const int8Value = byteValue > 127 ? byteValue - 256 : byteValue;
+                const pixelIndex = i * 4;
+                let color;
+
+                if (viewMode === 'opcode') {
+                    const NumOpcodes = opcodeColors.length;
+                    const colorIndex = ((int8Value % NumOpcodes) + NumOpcodes) % NumOpcodes;
+                    color = opcodeColors[colorIndex];
+                } else { // heatmap
+                    color = getHeatmapColor(int8Value);
+                }
+
+                imageDataBuffer[pixelIndex]     = color[0];
+                imageDataBuffer[pixelIndex + 1] = color[1];
+                imageDataBuffer[pixelIndex + 2] = color[2];
+                imageDataBuffer[pixelIndex + 3] = color[3];
+            }
+            offscreenCtx.putImageData(imageData, 0, 0);
+            requestAnimationFrame(draw);
+        }
+
         // --- Data Display & Controls ---
         const genSpan = document.getElementById('gen');
         const stepsSpan = document.getElementById('steps');
@@ -177,6 +225,8 @@
         let soupHeight = 0;
         let isDragging = false; // New flag to detect dragging
         let highlightedIpPtr = -1; // Tracked IP pointer for highlighting
+        let viewMode = 'opcode';
+        let lastColorIndices = null;
 
         // --- WebSocket Connection ---
         const socket = new WebSocket('ws://localhost:8080/ws');
@@ -276,6 +326,7 @@
                 }
             } else if (event.data instanceof ArrayBuffer) {
                 const colorIndices = new Uint8Array(event.data);
+                lastColorIndices = colorIndices;
                 const soupSize = colorIndices.length;
                 const canvasSize = Math.sqrt(soupSize);
 
@@ -291,24 +342,7 @@
                     offsetY = (canvasContainer.clientHeight - soupHeight * zoom) / 2;
                 }
 
-                for (let i = 0; i < soupSize; i++) {
-                    // Convert uint8 to int8 (signed byte)
-                    const byteValue = colorIndices[i];
-                    const int8Value = byteValue > 127 ? byteValue - 256 : byteValue;
-
-                    // Apply same modulo logic as backend: ((val % NumOpcodes) + NumOpcodes) % NumOpcodes
-                    const NumOpcodes = opcodeColors.length;
-                    const colorIndex = ((int8Value % NumOpcodes) + NumOpcodes) % NumOpcodes;
-
-                    const color = opcodeColors[colorIndex];
-                    const pixelIndex = i * 4;
-                    imageDataBuffer[pixelIndex]     = color[0];
-                    imageDataBuffer[pixelIndex + 1] = color[1];
-                    imageDataBuffer[pixelIndex + 2] = color[2];
-                    imageDataBuffer[pixelIndex + 3] = color[3];
-                }
-                offscreenCtx.putImageData(imageData, 0, 0);
-                requestAnimationFrame(draw);
+                renderSoup();
             }
         };
 
@@ -517,6 +551,19 @@
 
         relativeAddressingCheckbox.addEventListener('change', (event) => {
             sendAddressingMode('set_relative_addressing', event.target.checked);
+        });
+
+        const viewModeRadios = document.querySelectorAll('input[name="viewMode"]');
+        viewModeRadios.forEach(radio => {
+            radio.addEventListener('change', (event) => {
+                viewMode = event.target.value;
+                if (viewMode === 'opcode') {
+                    opcodeLegendDiv.style.display = 'block';
+                } else {
+                    opcodeLegendDiv.style.display = 'none';
+                }
+                renderSoup(); // Redraw with the new mode
+            });
         });
 
         // Resize Observer
