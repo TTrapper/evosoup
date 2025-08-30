@@ -10,7 +10,7 @@ import (
 
 // --- Simulation Constants ---
 const (
-	SoupSize              = 1024 * 1024 * 8
+	SoupSize              = 1024 * 1024
 	InitialNumIPs         = 8
 	TargetFPS             = 30  // Target a smooth FPS
 

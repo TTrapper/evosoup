@@ -1,68 +1,57 @@
 package vm
 
-import "encoding/binary"
-
-// --- Configuration ---
-
-
+import (
+	"math"
+	"math/rand"
+	"sync/atomic"
+)
 
 // --- Instruction Set Opcodes ---
 const (
-	NOOP byte = iota
-	ADD
-	SUB
-	JUMP_REL_IF_LT_ZERO
-	AND
-	OR
-	XOR
-	NOT
-	LOAD_VAL_FROM_ADDR
-	LOAD_ADDR_FROM_ADDR
-	LOAD_VAL_IMMEDIATE
-	LOAD_ADDR_IMMEDIATE
-	WRITE_VAL_TO_ADDR
-	NumOpcodes // This must be the last entry, it counts the number of opcodes
+	NOOP int8 = iota // 0
+	MOV              // 1
+	WRT              // 2
+	INC              // 3
+	DEC              // 4
+	XOR              // 5
+	SHF              // 6
+	INV              // 7
+	JMP_Z            // 8
+	NumOpcodes
 )
 
 var OpcodeNames = [...]string{
 	"NOOP",
-	"ADD",
-	"SUB",
-	"JUMP_REL_IF_LT_ZERO",
-	"AND",
-	"OR",
+	"MOV",
+	"WRT",
+	"INC",
+	"DEC",
 	"XOR",
-	"NOT",
-	"LOAD_VAL_FROM_ADDR",
-	"LOAD_ADDR_FROM_ADDR",
-	"LOAD_VAL_IMMEDIATE",
-	"LOAD_ADDR_IMMEDIATE",
-	"WRITE_VAL_TO_ADDR",
+	"SHF",
+	"INV",
+	"JMP_Z",
 }
 
 // IP represents an Instruction Pointer, our digital organism.
 type IP struct {
-	ID                  int
-	CurrentPtr          int32 // Current instruction pointer in the soup
-	Steps               int64 // Number of steps executed
-	Soup                []int8
-	ValueRegister       int8
-	AddressRegister     int32
-	Use32BitAddressing  bool
-	UseRelativeAddressing bool
+	ID                      int
+	CurrentPtr              int32 // Current instruction pointer in the soup
+	Steps                   int64 // Number of steps executed
+	Soup                    []int8
+	Use32BitAddressing      bool
+	UseRelativeAddressing   bool
+	JumpZFailureProbability *uint64
 }
 
 // SavableIP defines the data for an IP that can be saved in a snapshot.
 type SavableIP struct {
-	ID              int
-	CurrentPtr      int32
-	Steps           int64
-	ValueRegister   int8
-	AddressRegister int32
+	ID                 int
+	CurrentPtr         int32
+	Steps              int64
 	CurrentInstruction int8 // The raw instruction byte at CurrentPtr
 }
 
-// Savable returns a serializable representation of the IP.
+// CurrentState returns a serializable representation of the IP.
 func (ip *IP) CurrentState() SavableIP {
 	// Ensure CurrentPtr is within bounds for accessing Soup
 	soupLen := int32(len(ip.Soup))
@@ -72,22 +61,19 @@ func (ip *IP) CurrentState() SavableIP {
 		ID:                 ip.ID,
 		CurrentPtr:         ip.CurrentPtr,
 		Steps:              ip.Steps,
-		ValueRegister:      ip.ValueRegister,
-		AddressRegister:    ip.AddressRegister,
 		CurrentInstruction: ip.Soup[wrappedCurrentPtr],
 	}
 }
 
 // NewIP creates a new, minimal instruction pointer.
-func NewIP(id int, soup []int8, startPtr int32, use32BitAddressing bool, useRelativeAddressing bool) *IP {
+func NewIP(id int, soup []int8, startPtr int32, use32BitAddressing bool, useRelativeAddressing bool, jumpZFailureProbability *uint64) *IP {
 	ip := &IP{
-		ID:                  id,
-		Soup:                soup,
-		CurrentPtr:          startPtr,
-		ValueRegister:       0,
-		AddressRegister:     0,
-		Use32BitAddressing:  use32BitAddressing,
-		UseRelativeAddressing: useRelativeAddressing,
+		ID:                      id,
+		Soup:                    soup,
+		CurrentPtr:              startPtr,
+		Use32BitAddressing:      use32BitAddressing,
+		UseRelativeAddressing:   useRelativeAddressing,
+		JumpZFailureProbability: jumpZFailureProbability,
 	}
 	return ip
 }
@@ -127,64 +113,75 @@ func (ip *IP) Step() {
 		}
 	}
 
-	// Reads 1 or 4 bytes from a specified memory address (does not advance CurrentPtr).
-	readAtAddr := func(addr int32) int32 {
-		if ip.Use32BitAddressing {
-			var bs = make([]byte, 4)
-			for i := 0; i < 4; i++ {
-				bs[i] = byte(ip.Soup[wrapAddr(addr+int32(i))])
-			}
-			return int32(binary.LittleEndian.Uint32(bs))
+	// Calculates the final address for an operation based on the addressing mode.
+	resolveAddress := func(baseAddr int32, offset int32) int32 {
+		if ip.UseRelativeAddressing {
+			return wrapAddr(baseAddr + offset)
 		} else {
-			return int32(ip.Soup[wrapAddr(addr)])
+			return wrapAddr(offset)
 		}
 	}
 
-	// Calculates the final address for an operation based on the addressing mode.
-	resolveDataAddress := func(opcodeLocation int32) int32 {
-		if ip.UseRelativeAddressing {
-			return wrapAddr(opcodeLocation + ip.AddressRegister)
-		} else {
-			return wrapAddr(ip.AddressRegister)
-		}
-	}
+	opcodeLocation := ip.CurrentPtr
 
 	// --- Instruction Execution ---
-	opcodeLocation := ip.CurrentPtr
 	opcode := (int32(fetch8())%int32(NumOpcodes) + int32(NumOpcodes)) % int32(NumOpcodes)
 
-	// Pre-calculate the address for any instruction that needs it.
-	dataAddr := resolveDataAddress(opcodeLocation)
-
 	switch byte(opcode) {
-	case NOOP:
-	case ADD:
-		ip.ValueRegister += ip.Soup[dataAddr]
-	case SUB:
-		ip.ValueRegister -= ip.Soup[dataAddr]
-	case JUMP_REL_IF_LT_ZERO:
-		jumpOffset := ip.AddressRegister
-		if ip.ValueRegister < 0 {
-			ip.CurrentPtr = opcodeLocation + jumpOffset
+	case byte(NOOP):
+		// Does nothing.
+	case byte(MOV):
+		srcOffset := fetchImmediate()
+		destOffset := fetchImmediate()
+		srcAddr := resolveAddress(opcodeLocation, srcOffset)
+		destAddr := resolveAddress(opcodeLocation, destOffset)
+		ip.Soup[destAddr] = ip.Soup[srcAddr]
+	case byte(WRT):
+		destOffset := fetchImmediate()
+		value := fetch8()
+		destAddr := resolveAddress(opcodeLocation, destOffset)
+		ip.Soup[destAddr] = value
+	case byte(INC):
+		offset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, offset)
+		ip.Soup[addr]++
+	case byte(DEC):
+		offset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, offset)
+		ip.Soup[addr]--
+	case byte(XOR):
+		offset := fetchImmediate()
+		value := fetch8()
+		addr := resolveAddress(opcodeLocation, offset)
+		ip.Soup[addr] ^= value
+	case byte(JMP_Z):
+		addrOffset := fetchImmediate()
+		jumpOffset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, addrOffset)
+
+		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
+		if rand.Float64() >= prob {
+			if ip.Soup[addr] == 0 {
+				ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
+			}
 		}
-	case AND:
-		ip.ValueRegister &= ip.Soup[dataAddr]
-	case OR:
-		ip.ValueRegister |= ip.Soup[dataAddr]
-	case XOR:
-		ip.ValueRegister ^= ip.Soup[dataAddr]
-	case NOT:
-		ip.ValueRegister = ^ip.ValueRegister
-	case LOAD_VAL_FROM_ADDR:
-		ip.ValueRegister = ip.Soup[dataAddr]
-	case LOAD_ADDR_FROM_ADDR:
-		ip.AddressRegister = readAtAddr(dataAddr)
-	case LOAD_VAL_IMMEDIATE:
-		ip.ValueRegister = int8(fetchImmediate())
-	case LOAD_ADDR_IMMEDIATE:
-		ip.AddressRegister = fetchImmediate()
-	case WRITE_VAL_TO_ADDR:
-		ip.Soup[dataAddr] = ip.ValueRegister
+	case byte(SHF):
+		offset := fetchImmediate()
+		shiftByte := fetch8()
+		direction := (shiftByte >> 7) & 1 // Use the MSB for direction
+		amount := uint(shiftByte & 0x7F)    // Use the other 7 bits for amount
+
+		addr := resolveAddress(opcodeLocation, offset)
+
+		if direction == 0 { // Left shift
+			ip.Soup[addr] <<= amount
+		} else { // Right shift
+			ip.Soup[addr] >>= amount
+		}
+	case byte(INV):
+		offset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, offset)
+		ip.Soup[addr] = ^ip.Soup[addr]
 	}
 	ip.Steps++
 }

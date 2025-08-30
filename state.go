@@ -18,21 +18,25 @@ import (
 // AppState holds the entire application's state, including simulation and UI settings.
 type AppState struct {
 	// Simulation state
-	soup        []int8
-	population  sync.Map
-	nextIPID    int32
-	randSeed    int64
-	generation  int
-	entropies   []float64
-	timeElapsed int64 // In microseconds
+	soup                    []int8
+	population              sync.Map
+	nextIPID                int32
+	randSeed                int64
+	generation              int
+	entropies               []float64
+	timeElapsed             int64 // In microseconds
+	jumpZFailureProbability uint64
 
 	// Control state
 	jumpInterval        int64
 	ipCount             int32
 	paused              int32 // Atomic boolean: 0 for running, 1 for paused
-	singleStep          int32 // Atomic boolean: 0 for normal, 1 for single-step
 	Use32BitAddressing  bool
 	UseRelativeAddressing bool
+
+	// Goroutine management
+	ipStopChan chan struct{}
+	ipWg       sync.WaitGroup
 
 	// Visualization state
 	viewStartIndex int
@@ -54,6 +58,7 @@ func NewAppState() *AppState {
 		UseRelativeAddressing: true,  // Default from vm/vm.go
 		trackingEnabled:       false,
 		ipStateChan:           make(chan vm.SavableIP, 100), // Buffered channel for IP state updates
+		ipStopChan:            make(chan struct{}),
 	}
 }
 
@@ -85,7 +90,7 @@ func (s *AppState) loadSnapshot(filename string) error {
 	atomic.StoreInt32(&s.ipCount, 0)
 
 	for _, savableIP := range state.IPs {
-		ip := vm.NewIP(savableIP.ID, s.soup, savableIP.CurrentPtr, s.Use32BitAddressing, s.UseRelativeAddressing)
+		ip := vm.NewIP(savableIP.ID, s.soup, savableIP.CurrentPtr, s.Use32BitAddressing, s.UseRelativeAddressing, &s.jumpZFailureProbability)
 		s.population.Store(ip.ID, ip)
 		atomic.AddInt32(&s.ipCount, 1)
 	}
@@ -135,7 +140,7 @@ func (s *AppState) initializeSimulation() {
 	for i := 0; i < InitialNumIPs; i++ {
 		startPtr := rand.Int31n(SoupSize)
 		newID := atomic.AddInt32(&s.nextIPID, 1)
-		ip := vm.NewIP(int(newID), s.soup, startPtr, s.Use32BitAddressing, s.UseRelativeAddressing)
+		ip := vm.NewIP(int(newID), s.soup, startPtr, s.Use32BitAddressing, s.UseRelativeAddressing, &s.jumpZFailureProbability)
 		s.population.Store(ip.ID, ip)
 		atomic.AddInt32(&s.ipCount, 1)
 	}
@@ -144,23 +149,13 @@ func (s *AppState) initializeSimulation() {
 
 // runIP is the execution loop for a single IP.
 func (s *AppState) runIP(p *vm.IP) {
+	defer s.ipWg.Done()
 	for {
-		// Check if simulation is paused
-		for atomic.LoadInt32(&s.paused) == 1 && atomic.LoadInt32(&s.singleStep) == 0 {
-			time.Sleep(100 * time.Millisecond) // Prevent busy-waiting
-		}
-
-		p.Step()
-
-		// If in single-step mode, pause after one step
-		if atomic.LoadInt32(&s.singleStep) == 1 {
-			// Send IP state if tracking is enabled and this is the first IP
-			if s.trackingEnabled && p.ID == 1 {
-				log.Printf("Sending IP state for tracked IP %d", p.ID)
-				s.ipStateChan <- p.CurrentState()
-			}
-			atomic.StoreInt32(&s.paused, 1)
-			atomic.StoreInt32(&s.singleStep, 0) // Consume the single step
+		select {
+		case <-s.ipStopChan:
+			return // Exit goroutine when stop signal is received
+		default:
+			p.Step()
 		}
 	}
 }
@@ -182,6 +177,7 @@ func (s *AppState) RunIPStateBroadcaster(hub *Hub) {
 func (s *AppState) LaunchIPs() {
 	s.population.Range(func(key, value interface{}) bool {
 		ip := value.(*vm.IP)
+		s.ipWg.Add(1)
 		go s.runIP(ip)
 		return true
 	})
@@ -192,47 +188,56 @@ func (s *AppState) SetJumpInterval(interval int64) {
 	atomic.StoreInt64(&s.jumpInterval, interval)
 }
 
-// runJumpTimer manages the global jump mechanism.
+// runJumpTimer manages the JMP_Z failure probability.
 func (s *AppState) runJumpTimer() {
-	jumpTicker := time.NewTicker(time.Microsecond)
-	defer jumpTicker.Stop()
-
-	for range jumpTicker.C {
+	for {
 		if atomic.LoadInt32(&s.paused) == 1 {
 			time.Sleep(100 * time.Millisecond) // Prevent busy-waiting
 			continue
 		}
-		atomic.AddInt64(&s.timeElapsed, 1)
-		currentInterval := atomic.LoadInt64(&s.jumpInterval)
 
-		if currentInterval > 0 && atomic.LoadInt64(&s.timeElapsed)%currentInterval == 0 {
-			s.population.Range(func(key, value interface{}) bool {
-				ip := value.(*vm.IP)
-				ip.ValueRegister = int8(rand.Intn(256) - 128)
-				ip.AddressRegister = int32(rand.Intn(256) - 128)
-				return true
-			})
+		currentInterval := atomic.LoadInt64(&s.jumpInterval)
+		var prob float64
+		if currentInterval > 0 {
+			prob = 1.0 / float64(currentInterval)
+			if prob > 1.0 {
+				prob = 1.0
+			}
+		} else {
+			prob = 0.0
 		}
+
+		atomic.StoreUint64(&s.jumpZFailureProbability, math.Float64bits(prob))
+		time.Sleep(100 * time.Millisecond) // Avoid busy-looping
 	}
 }
 
 // Pause sets the paused state of the simulation.
 func (s *AppState) Pause() {
 	log.Println("Pausing simulation")
-	atomic.StoreInt32(&s.paused, 1)
+	if atomic.CompareAndSwapInt32(&s.paused, 0, 1) { // If was running (0), set to paused (1)
+		close(s.ipStopChan) // Signal all runIP goroutines to stop
+		s.ipWg.Wait()       // Wait for all runIP goroutines to finish
+	} else {
+		log.Println("Simulation is already paused.")
+	}
 }
 
 // Resume sets the paused state of the simulation to false.
 func (s *AppState) Resume() {
 	log.Println("Resuming simulation")
-	atomic.StoreInt32(&s.paused, 0)
+	if atomic.CompareAndSwapInt32(&s.paused, 1, 0) { // If was paused (1), set to running (0)
+		s.ipStopChan = make(chan struct{}) // Re-initialize the channel
+		s.LaunchIPs()                     // Restart IP goroutines
+	} else {
+		log.Println("Simulation is already running.")
+	}
 }
 
 // Step advances the simulation by one step if it is paused.
 func (s *AppState) Step() {
 	log.Println("Stepping simulation")
 	if atomic.LoadInt32(&s.paused) == 1 {
-		// If tracking is enabled, step only the first IP
 		if s.trackingEnabled {
 			if val, ok := s.population.Load(1); ok { // Always track IP with ID 1
 				ip := val.(*vm.IP)
@@ -243,11 +248,16 @@ func (s *AppState) Step() {
 				log.Printf("Tracked IP with ID 1 not found.")
 			}
 		} else {
-			log.Println("Step command received, but IP tracking is not enabled.")
+			// If tracking is not enabled, step all IPs
+			s.population.Range(func(key, value interface{}) bool {
+				ip := value.(*vm.IP)
+				ip.Step()
+				return true
+			})
+			log.Println("Stepped all IPs.")
 		}
 		// Keep the simulation paused after the step
 		atomic.StoreInt32(&s.paused, 1)
-		atomic.StoreInt32(&s.singleStep, 0) // Ensure singleStep is reset
 	} else {
 		log.Println("Step command received, but simulation is not paused.")
 	}
@@ -359,7 +369,8 @@ func (s *AppState) RunStatistics(hub *Hub) {
 				totalSteps += ip.Steps
 				return true
 			})
-			var stepsPerSecond = 1000000 * totalSteps / atomic.LoadInt64(&s.timeElapsed)
+			var stepsPerSecond = int64(0)
+//			var stepsPerSecond = 1000000 * totalSteps / atomic.LoadInt64(&s.timeElapsed)
 
 			// Soup Entropy
 			soupCounts := make(map[int32]int)

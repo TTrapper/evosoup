@@ -113,8 +113,6 @@
         <div id="trackedIpState">
             <p>ID: <span id="trackedIpId">-</span></p>
             <p>Current Ptr: <span id="trackedIpCurrentPtr">-</span></p>
-            <p>Value Reg: <span id="trackedIpValueReg">-</span></p>
-            <p>Address Reg: <span id="trackedIpAddressReg">-</span></p>
             <p>Instruction: <span id="trackedIpInstruction">-</span></p>
             <button id="stepButton">Step</button>
             <label><input type="checkbox" id="followIpCheckbox" checked> Follow IP</label>
@@ -135,34 +133,18 @@
 
         const opcodeColors = [
             [46, 46, 46, 255],      // 0: NOOP (Dark Gray)
-            [117, 80, 123, 255],    // 1: ADD (Purple-ish)
-            [204, 0, 0, 255],       // 2: SUB (Red)
-            [245, 121, 0, 255],     // 3: JUMP_REL_IF_LT_ZERO (Orange)
-            [0, 255, 255, 255],     // 4: AND (Cyan)
-            [255, 0, 255, 255],     // 5: OR (Magenta)
-            [128, 0, 128, 255],     // 6: XOR (Dark Purple)
-            [0, 128, 128, 255],     // 7: NOT (Teal)
-            [52, 101, 164, 255],    // 8: LOAD_VAL_FROM_ADDR (Blue)
-            [196, 160, 0, 255],     // 9: LOAD_ADDR_FROM_ADDR (Yellow)
-            [78, 154, 6, 255],      // 10: LOAD_VAL_IMMEDIATE (Green)
-            [164, 0, 0, 255],       // 11: LOAD_ADDR_IMMEDIATE (Dark Red)
-            [255, 255, 255, 255],   // 12: WRITE_VAL_TO_ADDR (White)
+            [52, 101, 164, 255],    // 1: MOV (Blue)
+            [255, 255, 255, 255],   // 2: WRT (White)
+            [78, 154, 6, 255],      // 3: INC (Green)
+            [115, 210, 22, 255],    // 4: DEC (Lighter Green)
+            [0, 255, 255, 255],     // 5: XOR (Cyan)
+            [0, 128, 128, 255],     // 6: SHF (Teal)
+            [100, 200, 200, 255],   // 7: INV (Lighter Teal)
+            [245, 121, 0, 255]      // 8: JMP_Z (Orange)
         ];
 
         const opcodeNames = [
-            "NOOP",
-            "ADD",
-            "SUB",
-            "JUMP_REL_IF_LT_ZERO",
-            "AND",
-            "OR",
-            "XOR",
-            "NOT",
-            "LOAD_VAL_FROM_ADDR",
-            "LOAD_ADDR_FROM_ADDR",
-            "LOAD_VAL_IMMEDIATE",
-            "LOAD_ADDR_IMMEDIATE",
-            "WRITE_VAL_TO_ADDR",
+            "NOOP", "MOV", "WRT", "INC", "DEC", "XOR", "SHF", "INV", "JMP_Z"
         ];
 
         // --- Data Display & Controls ---
@@ -249,8 +231,6 @@
                     // It's an IP state update (SavableIP)
                     trackedIpIdSpan.textContent = data.ID;
                     trackedIpCurrentPtrSpan.textContent = "0x" + data.CurrentPtr.toString(16);
-                    trackedIpValueRegSpan.textContent = "0x" + data.ValueRegister.toString(16);
-                    trackedIpAddressRegSpan.textContent = "0x" + data.AddressRegister.toString(16);
 
                     highlightedIpPtr = data.CurrentPtr; // Update highlighted IP pointer
 
@@ -288,7 +268,7 @@
 
                     // Add to instruction history
                     const historyItem = document.createElement('div');
-                    historyItem.textContent = `ID: ${data.ID}, Ptr: 0x${data.CurrentPtr.toString(16)}, Val: 0x${data.ValueRegister.toString(16)}, Addr: 0x${data.AddressRegister.toString(16)}, Instr: ${instructionName}`;
+                    historyItem.textContent = `ID: ${data.ID}, Ptr: 0x${data.CurrentPtr.toString(16)}, Instr: ${instructionName}`;
                     instructionHistoryDiv.prepend(historyItem); // Add to the top
                     if (instructionHistoryDiv.children.length > 50) { // Limit history to 50 items
                         instructionHistoryDiv.removeChild(instructionHistoryDiv.lastChild);
@@ -404,7 +384,7 @@
 
             // Clamp zoom level
             const maxZoom = 32;
-            const minZoom = canvasContainer.clientWidth / 1024; // Ensure it doesn't get smaller than the view
+            const minZoom = canvasContainer.clientHeight / 1024; // Ensure it doesn't get smaller than the view
             zoom = Math.max(minZoom, Math.min(newZoom, maxZoom));
 
             // Adjust offset to keep the mouse position constant
@@ -414,28 +394,29 @@
             requestAnimationFrame(draw);
         });
 
-        // Logarithmic scale conversion functions
-        const minLog = Math.log(1);
-        const maxLog = Math.log(1000000);
+
+        // Define the ranges for the slider and the frequency
         const minSlider = 0;
         const maxSlider = 100;
+        const minFreq = 1;
+        const maxFreq = 100;
 
-        function calculateLogFrequency(sliderValue) {
-            const scale = (maxLog - minLog) / (maxSlider - minSlider);
-            const logValue = minLog + scale * (sliderValue - minSlider);
-            return Math.round(Math.exp(logValue));
+        function calculateLinearFrequency(sliderValue) {
+            const scale = (maxFreq - minFreq) / (maxSlider - minSlider);
+            const frequency = minFreq + scale * (sliderValue - minSlider);
+            return Math.round(frequency);
         }
 
-        function calculateSliderValue(logFrequency) {
-            const scale = (maxSlider - minSlider) / (maxLog - minLog);
-            const sliderValue = minSlider + scale * (Math.log(logFrequency) - minLog);
+        function calculateSliderValue(frequency) {
+            const scale = (maxSlider - minSlider) / (maxFreq - minFreq);
+            const sliderValue = minSlider + scale * (frequency - minFreq);
             return Math.round(sliderValue);
         }
 
         // Jump Rate Slider
         jumpRateSlider.addEventListener('input', (e) => {
             const linearSliderValue = parseInt(e.target.value);
-            const newFreq = calculateLogFrequency(linearSliderValue);
+            const newFreq = calculateLinearFrequency(linearSliderValue);
             jumpRateValueSpan.textContent = newFreq;
             const message = {
                 type: "set_jump_rate",
@@ -445,7 +426,7 @@
                 socket.send(JSON.stringify(message));
             }
         });
-        
+
         // --- Command Buttons ---
         const pauseButton = document.getElementById('pauseButton');
         const resumeButton = document.getElementById('resumeButton');
@@ -461,8 +442,6 @@
         const rightPanel = document.getElementById('right-panel');
         const trackedIpIdSpan = document.getElementById('trackedIpId');
         const trackedIpCurrentPtrSpan = document.getElementById('trackedIpCurrentPtr');
-        const trackedIpValueRegSpan = document.getElementById('trackedIpValueReg');
-        const trackedIpAddressRegSpan = document.getElementById('trackedIpAddressReg');
         const trackedIpInstructionSpan = document.getElementById('trackedIpInstruction');
         const instructionHistoryDiv = document.getElementById('instructionHistory');
 
