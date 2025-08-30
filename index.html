@@ -151,16 +151,24 @@
             "NOOP", "MOV", "WRT", "INC", "DEC", "XOR", "SHF", "INV", "JMP_Z"
         ];
 
-        function getHeatmapColor(value) { // value from -128 to 127
+        function getHeatmapColor(value) {
             let r = 0, g = 0, b = 0;
+            const alpha = 255;
+            // Handle positive values (0 to 127): transition from black to red
             if (value > 0) {
-                // Positive values: red
-                r = Math.floor(255 * (value / 127.0));
-            } else if (value < 0) {
-                // Negative values: blue
-                b = Math.floor(255 * (Math.abs(value) / 128.0));
+                const intensity = value / 127.0;
+                r = 255 * intensity;
             }
-            return [r, g, b, 255]; // Return with alpha
+            // Handle negative values (-128 to -1): transition from black to blue
+            else if (value < 0) {
+                const intensity = Math.abs(value) / 128.0;
+                b = 255 * intensity;
+            }
+            // Handle the midpoint (zero)
+            else {
+                b = 0;
+            }
+            return [r, g, b, alpha];
         }
 
         function renderSoup() {
