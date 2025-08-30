@@ -91,8 +91,8 @@
         <p>Generation: <span id="gen">0</span></p>
         <p>Steps/sec: <span id="steps">0</span></p>
         <p>Entropy: <span id="entropy">0.00</span></p>
-        <label for="jumpRate">Jump Interval (μs): <span id="jumpRateValue">1000</span></label>
-        <input type="range" id="jumpRate" min="0" max="100" step="1" value="50">
+        <label for="jumpFailureProbability">Jump Failure Rate: <span id="jumpFailureProbabilityValue">50</span>%</label>
+        <input type="range" id="jumpFailureProbability" min="0" max="100" step="1" value="50">
         <div id="controls-buttons">
             <button id="pauseButton">Pause</button>
             <button id="resumeButton">Resume</button>
@@ -151,8 +151,8 @@
         const genSpan = document.getElementById('gen');
         const stepsSpan = document.getElementById('steps');
         const entropySpan = document.getElementById('entropy');
-        const jumpRateSlider = document.getElementById('jumpRate');
-        const jumpRateValueSpan = document.getElementById('jumpRateValue');
+        const jumpFailureProbabilitySlider = document.getElementById('jumpFailureProbability');
+        const jumpFailureProbabilityValueSpan = document.getElementById('jumpFailureProbabilityValue');
         const opcodeLegendDiv = document.getElementById('opcode-legend');
 
         // Generate opcode legend
@@ -395,32 +395,13 @@
         });
 
 
-        // Define the ranges for the slider and the frequency
-        const minSlider = 0;
-        const maxSlider = 100;
-        const minFreq = 1;
-        const maxFreq = 100;
-
-        function calculateLinearFrequency(sliderValue) {
-            const scale = (maxFreq - minFreq) / (maxSlider - minSlider);
-            const frequency = minFreq + scale * (sliderValue - minSlider);
-            return Math.round(frequency);
-        }
-
-        function calculateSliderValue(frequency) {
-            const scale = (maxSlider - minSlider) / (maxFreq - minFreq);
-            const sliderValue = minSlider + scale * (frequency - minFreq);
-            return Math.round(sliderValue);
-        }
-
-        // Jump Rate Slider
-        jumpRateSlider.addEventListener('input', (e) => {
-            const linearSliderValue = parseInt(e.target.value);
-            const newFreq = calculateLinearFrequency(linearSliderValue);
-            jumpRateValueSpan.textContent = newFreq;
+        // Jump Failure Probability Slider
+        jumpFailureProbabilitySlider.addEventListener('input', (e) => {
+            const probability = parseInt(e.target.value);
+            jumpFailureProbabilityValueSpan.textContent = probability;
             const message = {
-                type: "set_jump_rate",
-                value: newFreq
+                type: "set_jump_failure_probability",
+                value: probability
             };
             if (socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify(message));
@@ -543,12 +524,11 @@
 
         socket.onopen = function(event) {
             console.log("WebSocket connection established.");
-            // Set initial jump rate on the server and UI
-            // Calculate initial slider value based on default frequency (1)
-            const initialFreq = 1; // This should match the default in vm/vm.go
-            jumpRateSlider.value = calculateSliderValue(initialFreq);
-            jumpRateValueSpan.textContent = initialFreq;
-            jumpRateSlider.dispatchEvent(new Event('input'));
+            // Set initial jump failure probability on the server and UI
+            const initialProbability = 50; // Default value
+            jumpFailureProbabilitySlider.value = initialProbability;
+            jumpFailureProbabilityValueSpan.textContent = initialProbability;
+            jumpFailureProbabilitySlider.dispatchEvent(new Event('input'));
         };
 
         socket.onerror = function(error) {

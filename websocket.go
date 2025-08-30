@@ -67,8 +67,8 @@ func (c *Client) readPump() {
 
 		// Route the message based on its type.
 		switch msg.Type {
-		case "set_jump_rate":
-			log.Printf("Received set_jump_rate: %f", msg.Value)
+		case "set_jump_failure_probability":
+			log.Printf("Received set_jump_failure_probability: %f", msg.Value)
 			// Safely send to the hub's channel.
 			select {
 			case c.hub.SetJumpInterval <- msg.Value:

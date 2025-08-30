@@ -199,7 +199,7 @@ func (s *AppState) runJumpTimer() {
 		currentInterval := atomic.LoadInt64(&s.jumpInterval)
 		var prob float64
 		if currentInterval > 0 {
-			prob = 1.0 / float64(currentInterval)
+			prob = float64(currentInterval) / 100.0
 			if prob > 1.0 {
 				prob = 1.0
 			}
