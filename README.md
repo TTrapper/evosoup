@@ -1,48 +1,40 @@
 # EvoSoup
 
-EvoSoup is an experiment in digital evolution where the selective pressures are the fundamental "physics" of the computer itself, not abstract biological metaphors. We have a virtual machine with random code and we want to see what patterns emerge. Organisms are completely implicit and virtual now.
+EvoSoup is an experiment in digital evolution that attempts to simulate life at its most fundamental level. It creates a virtual world where the very definition of an "organism" is not predetermined, but must emerge from the underlying physics of the simulation.
 
-## Core Concepts
+## The Concept
 
-*   **The Soup**: A large, shared array of 32-bit integers (`[]int32`). This is the environment. It contains the code that the IPs execute. Any value in the soup can be interpreted as an instruction's opcode or an argument.
-*   **Instruction Pointers (IPs)**: These are the digital organisms. Each IP has its own set of registers and a pointer to its current location in the soup. They execute instructions from the soup, one step at a time.
-*   **Concurrency**: Each IP runs in its own lightweight goroutine, allowing for massive parallelism and chaotic, non-deterministic interactions within the soup.
-*   **Evolution**: There is no explicit fitness function. We still intend to tie simulation to the physical machine by providing the option to jump points after a time interval rather than number of steps.
+The core of EvoSoup is a shared memory space called the "soup." This soup is initialized with a random sequence of simple instructions. A multitude of "Instruction Pointers" (IPs) concurrently execute this code. These IPs are not the organisms themselves; they are merely pointers, representing the focus of execution.
+
+In this world, there are no predefined boundaries for an organism. Unlike many artificial life projects that explicitly define structures for replication, crossover, and resource management, EvoSoup starts with as little as possible. An "organism" is hypothesized to be an emergent pattern within the soup—a self-sustaining or self-replicating block of code that persists and propagates over time.
+
+The only true resource constraint is the competition for CPU time. Multiple IPs run in parallel without any thread safety, meaning their execution is a chaotic race. This ties the simulation directly to the dynamics of the physical computer, where the ability of a code pattern to be executed and re-executed is its measure of fitness.
+
+Evolution in EvoSoup is therefore a process of discovery, searching for emergent, resilient patterns of computation in a sea of randomness.
 
 ## How to Run
 
-Simply run the `main.go` file:
+1.  **Install Go:** Make sure you have Go installed on your system.
+2.  **Run the simulation:** Open a terminal in the project directory and run the following command:
 
-```bash
-go run main.go
-```
+    ```bash
+    go run .
+    ```
 
-## Configuration
+3.  **View the simulation:** Open your web browser and go to `http://localhost:8080`. You will see a real-time visualization of the soup and the IPs. You can also interact with the simulation through the controls on the web page.
 
-The primary simulation parameters are defined as constants in `main.go`:
+### Command-line Options
 
-*   `SoupSize`: The size of the shared memory array.
-*   `InitialNumIPs`: The number of IPs to start with.
-*   `TargetFPS`: The target frames per second for the visualization.
+*   `-load <filename>`: Load a previous simulation state from a snapshot file.
+*   `-duration <minutes>`: Run the simulation for a specific number of minutes. If not specified, the simulation will run indefinitely.
 
-## The Virtual Machine (VM)
+## The Frontend
 
-The simulation uses a simple custom VM to execute the IP's code.
+EvoSoup includes a web-based frontend that allows you to visualize and interact with the simulation in real-time. The frontend is served automatically when you run the simulation and can be accessed at `http://localhost:8080`.
 
-*   **Registers**: Each IP has `4` general-purpose 32-bit registers.
-*   **Instruction Format**: Instructions are simple. The first `int32` at the IP's current pointer is the opcode. Subsequent `int32` values are the arguments (e.g., register indices, literal values).
+The frontend provides:
 
-### Instruction Set
-
-The opcode is determined by `value % NumOpcodes`.
-
-| Opcode             | Arguments                               | Description                                                                                                                            |
-| ------------------ | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `NOOP`             | 0                                       | Does nothing.                                                                                                                          |
-| `SET`              | `reg_dest`, `value`                     | Sets `reg_dest` to the literal `value`.                                                                                                |
-| `COPY`             | `reg_dest`, `reg_src`                   | Copies the value from `reg_src` to `reg_dest`.                                                                                         |
-| `ADD`              | `reg_dest`, `reg_src1`, `reg_src2`      | Adds the values in `reg_src1` and `reg_src2` and stores the result in `reg_dest`.                                                      |
-| `SUB`              | `reg_dest`, `reg_src1`, `reg_src2`      | Subtracts the value in `reg_src2` from `reg_src1` and stores the result in `reg_dest`.                                                 |
-| `JUMP_REL_IF_ZERO` | `reg_cond`, `reg_offset`                | If the value in `reg_cond` is 0, jumps the instruction pointer by the amount in `reg_offset` (relative to the `JUMP` instruction).      |
-| `READ_REL`         | `reg_dest`, `reg_offset`                | Reads a value from the soup at `current_ptr + reg_offset` and stores it in `reg_dest`. The address is wrapped to prevent out-of-bounds. |
-| `WRITE_REL`        | `reg_src`, `reg_offset`                 | Writes the value from `reg_src` into the soup at `current_ptr + reg_offset`. The address is wrapped to prevent out-of-bounds.          |
+*   A real-time visualization of the soup's memory.
+*   Statistics about the simulation, such as population size and instruction entropy.
+*   Controls to pause, resume, and step the simulation.
+*   Options to adjust simulation parameters, such as the jump rate and addressing modes.
