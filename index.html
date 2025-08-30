@@ -292,7 +292,14 @@
                 }
 
                 for (let i = 0; i < soupSize; i++) {
-                    const colorIndex = colorIndices[i] < opcodeColors.length ? colorIndices[i] : 0;
+                    // Convert uint8 to int8 (signed byte)
+                    const byteValue = colorIndices[i];
+                    const int8Value = byteValue > 127 ? byteValue - 256 : byteValue;
+
+                    // Apply same modulo logic as backend: ((val % NumOpcodes) + NumOpcodes) % NumOpcodes
+                    const NumOpcodes = opcodeColors.length;
+                    const colorIndex = ((int8Value % NumOpcodes) + NumOpcodes) % NumOpcodes;
+
                     const color = opcodeColors[colorIndex];
                     const pixelIndex = i * 4;
                     imageDataBuffer[pixelIndex]     = color[0];

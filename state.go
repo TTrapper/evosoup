@@ -323,8 +323,7 @@ func (s *AppState) RunVisualization(hub *Hub) {
 	ticker := time.NewTicker(time.Second / TargetFPS)
 	defer ticker.Stop()
 
-	colorIndices := make([]byte, StatsAndVisSize) // Use StatsAndVisSize for the visualization
-	numColors := int32(vm.NumOpcodes)
+	currentIndices := make([]byte, StatsAndVisSize) // Use StatsAndVisSize for the visualization
 
 	for range ticker.C {
 		// Ensure viewStartIndex and viewEndIndex are within bounds
@@ -341,12 +340,11 @@ func (s *AppState) RunVisualization(hub *Hub) {
 
 		// Create the color index map from the current soup state
 		for i, val := range s.soup[currentViewStartIndex:currentViewEndIndex] {
-			colorIndex := (int32(val)%numColors + numColors) % numColors
-			colorIndices[i] = byte(colorIndex)
+			currentIndices[i] = byte(val)
 		}
 
 		// Send the raw byte slice to the hub's public broadcast channel.
-		hub.Broadcast <- colorIndices
+		hub.Broadcast <- currentIndices
 	}
 }
 
