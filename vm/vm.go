@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"encoding/binary"
 	"math"
 	"math/rand"
 	"sync/atomic"
@@ -94,14 +95,14 @@ func (ip *IP) Step() {
 		return val
 	}
 
-	// Fetches 4 bytes from the instruction stream and advances the pointer.
+	// Fetches 4 bytes and converts them to a 32-bit integer.
 	fetch32 := func() int32 {
-		var val int32
-		val = int32(fetch8()) << 24
-		val |= int32(fetch8()) << 16
-		val |= int32(fetch8()) << 8
-		val |= int32(fetch8())
-		return val
+		b1 := byte(fetch8())
+		b2 := byte(fetch8())
+		b3 := byte(fetch8())
+		b4 := byte(fetch8())
+		byteSlice := []byte{b1, b2, b3, b4}
+		return int32(binary.BigEndian.Uint32(byteSlice))
 	}
 
 	// Fetches an immediate operand from the instruction stream.
@@ -125,36 +126,36 @@ func (ip *IP) Step() {
 	opcodeLocation := ip.CurrentPtr
 
 	// --- Instruction Execution ---
-	opcode := (int32(fetch8())%int32(NumOpcodes) + int32(NumOpcodes)) % int32(NumOpcodes)
+	opcode := ((fetch8())%(NumOpcodes) + (NumOpcodes)) % (NumOpcodes)
 
-	switch byte(opcode) {
-	case byte(NOOP):
+	switch opcode {
+	case NOOP:
 		// Does nothing.
-	case byte(MOV):
+	case MOV:
 		srcOffset := fetchImmediate()
 		destOffset := fetchImmediate()
 		srcAddr := resolveAddress(opcodeLocation, srcOffset)
 		destAddr := resolveAddress(opcodeLocation, destOffset)
 		ip.Soup[destAddr] = ip.Soup[srcAddr]
-	case byte(WRT):
+	case WRT:
 		destOffset := fetchImmediate()
 		value := fetch8()
 		destAddr := resolveAddress(opcodeLocation, destOffset)
 		ip.Soup[destAddr] = value
-	case byte(INC):
+	case INC:
 		offset := fetchImmediate()
 		addr := resolveAddress(opcodeLocation, offset)
 		ip.Soup[addr]++
-	case byte(DEC):
+	case DEC:
 		offset := fetchImmediate()
 		addr := resolveAddress(opcodeLocation, offset)
 		ip.Soup[addr]--
-	case byte(XOR):
+	case XOR:
 		offset := fetchImmediate()
 		value := fetch8()
 		addr := resolveAddress(opcodeLocation, offset)
 		ip.Soup[addr] ^= value
-	case byte(JMP_Z):
+	case JMP_Z:
 		addrOffset := fetchImmediate()
 		jumpOffset := fetchImmediate()
 		addr := resolveAddress(opcodeLocation, addrOffset)
@@ -165,7 +166,8 @@ func (ip *IP) Step() {
 				ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
 			}
 		}
-	case byte(SHF):
+	case SHF:
+		// NOTE this op causes a 'grid of activity' when in 32-bit absolute mode
 		offset := fetchImmediate()
 		shiftByte := fetch8()
 		direction := (shiftByte >> 7) & 1 // Use the MSB for direction
@@ -178,7 +180,7 @@ func (ip *IP) Step() {
 		} else { // Right shift
 			ip.Soup[addr] >>= amount
 		}
-	case byte(INV):
+	case INV:
 		offset := fetchImmediate()
 		addr := resolveAddress(opcodeLocation, offset)
 		ip.Soup[addr] = ^ip.Soup[addr]
