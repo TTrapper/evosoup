@@ -18,6 +18,12 @@ const (
 	SHF              // 6
 	INV              // 7
 	JMP_Z            // 8
+	ADD              // 9
+	SUB              // 10
+	AND              // 11
+	OR               // 12
+	JMP              // 13
+	JMP_NZ           // 14
 	NumOpcodes
 )
 
@@ -31,6 +37,12 @@ var OpcodeNames = [...]string{
 	"SHF",
 	"INV",
 	"JMP_Z",
+	"ADD",
+	"SUB",
+	"AND",
+	"OR",
+	"JMP",
+	"JMP_NZ",
 }
 
 // IP represents an Instruction Pointer, our digital organism.
@@ -184,6 +196,43 @@ func (ip *IP) Step() {
 		offset := fetchImmediate()
 		addr := resolveAddress(opcodeLocation, offset)
 		ip.Soup[addr] = ^ip.Soup[addr]
+	case ADD:
+		offset := fetchImmediate()
+		value := fetch8()
+		addr := resolveAddress(opcodeLocation, offset)
+		ip.Soup[addr] += value
+	case SUB:
+		offset := fetchImmediate()
+		value := fetch8()
+		addr := resolveAddress(opcodeLocation, offset)
+		ip.Soup[addr] -= value
+	case AND:
+		offset := fetchImmediate()
+		value := fetch8()
+		addr := resolveAddress(opcodeLocation, offset)
+		ip.Soup[addr] &= value
+	case OR:
+		offset := fetchImmediate()
+		value := fetch8()
+		addr := resolveAddress(opcodeLocation, offset)
+		ip.Soup[addr] |= value
+	case JMP:
+		jumpOffset := fetchImmediate()
+		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
+		if rand.Float64() >= prob {
+			ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
+		}
+	case JMP_NZ:
+		addrOffset := fetchImmediate()
+		jumpOffset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, addrOffset)
+
+		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
+		if rand.Float64() >= prob {
+			if ip.Soup[addr] != 0 {
+				ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
+			}
+		}
 	}
 	ip.Steps++
 }

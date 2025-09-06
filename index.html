@@ -144,12 +144,17 @@
             [0, 255, 255, 255],     // 5: XOR (Cyan)
             [0, 128, 128, 255],     // 6: SHF (Teal)
             [100, 200, 200, 255],   // 7: INV (Lighter Teal)
-            [245, 121, 0, 255]      // 8: JMP_Z (Orange)
+            [245, 121, 0, 255],     // 8: JMP_Z (Orange)
+            [204, 0, 0, 255],       // 9: ADD (Red)
+            [255, 102, 102, 255],   // 10: SUB (Lighter Red)
+            [102, 51, 0, 255],      // 11: AND (Brown)
+            [153, 102, 51, 255],    // 12: OR (Lighter Brown)
+            [191, 0, 255, 255],     // 13: JMP (Purple)
+            [255, 128, 255, 255]    // 14: JMP_NZ (Pink)
         ];
 
-        const opcodeNames = [
-            "NOOP", "MOV", "WRT", "INC", "DEC", "XOR", "SHF", "INV", "JMP_Z"
-        ];
+        let opcodeNames = []; // Will be populated from websocket
+        let opcodeData = [];
 
         function getHeatmapColor(value) {
             let r = 0, g = 0, b = 0;
@@ -187,9 +192,13 @@
                 let color;
 
                 if (viewMode === 'opcode') {
-                    const NumOpcodes = opcodeColors.length;
-                    const colorIndex = ((int8Value % NumOpcodes) + NumOpcodes) % NumOpcodes;
-                    color = opcodeColors[colorIndex];
+                    if (!opcodeData || opcodeData.length === 0) {
+                        color = [128, 128, 128, 255]; // Default gray if no data
+                    } else {
+                        const NumOpcodes = opcodeData.length;
+                        const colorIndex = ((int8Value % NumOpcodes) + NumOpcodes) % NumOpcodes;
+                        color = opcodeData[colorIndex].color;
+                    }
                 } else { // heatmap
                     color = getHeatmapColor(int8Value);
                 }
@@ -211,16 +220,18 @@
         const jumpFailureProbabilityValueSpan = document.getElementById('jumpFailureProbabilityValue');
         const opcodeLegendDiv = document.getElementById('opcode-legend');
 
-        // Generate opcode legend
-        opcodeNames.forEach((name, index) => {
-            const color = opcodeColors[index];
-            if (color) {
+        function generateOpcodeLegend() {
+            opcodeLegendDiv.innerHTML = ''; // Clear existing legend
+            if (!opcodeData || opcodeData.length === 0) return;
+            opcodeData.forEach(opcode => {
+                const color = opcode.color;
+                const name = opcode.name;
                 const colorBox = `<span style="display:inline-block; width:12px; height:12px; background-color:rgba(${color.join(',')}); border:1px solid #777; vertical-align:middle; margin-right:5px;"></span>`;
                 const legendItem = document.createElement('div');
                 legendItem.innerHTML = `${colorBox}${name}`;
                 opcodeLegendDiv.appendChild(legendItem);
-            }
-        });
+            });
+        }
 
         // --- View State ---
         let zoom = 1;
@@ -280,7 +291,20 @@
         socket.onmessage = function(event) {
             if (typeof event.data === 'string') {
                 const data = JSON.parse(event.data);
-                if (data.Generation !== undefined) {
+                if (data.type === 'instruction_set') {
+                    opcodeNames = data.instructions;
+                    // Combine names and colors
+                    opcodeData = opcodeNames.map((name, index) => {
+                        return {
+                            name: name,
+                            color: opcodeColors[index] || [128, 128, 128, 255] // Default gray
+                        };
+                    });
+                    generateOpcodeLegend();
+                    if (lastColorIndices) {
+                        renderSoup();
+                    }
+                } else if (data.Generation !== undefined) {
                     // It's GenerationStats
                     genSpan.textContent = data.Generation;
                     stepsSpan.textContent = (data.StepsPerSecond).toLocaleString();
@@ -306,11 +330,17 @@
                         requestAnimationFrame(draw);
                     }
 
-                    // Display instruction name and color
-                    const instructionValue = data.CurrentInstruction;
-                    const colorIndex = (instructionValue % opcodeColors.length + opcodeColors.length) % opcodeColors.length;
-                    const color = opcodeColors[colorIndex];
-                    const instructionName = opcodeNames[colorIndex];
+                    let instructionName = "UNKNOWN";
+                    let color = [128, 128, 128, 255]; // Default gray
+
+                    if (opcodeData && opcodeData.length > 0) {
+                        const instructionValue = data.CurrentInstruction;
+                        const colorIndex = (instructionValue % opcodeData.length + opcodeData.length) % opcodeData.length;
+                        const opcode = opcodeData[colorIndex];
+                        instructionName = opcode.name;
+                        color = opcode.color;
+                    }
+
 
                     trackedIpInstructionSpan.innerHTML = ``; // Clear previous content
                     const colorBox = document.createElement('span');

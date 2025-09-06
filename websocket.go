@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"evolution/vm"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +18,12 @@ const (
 	// Maximum message size allowed from peer.
 	maxMessageSize = 512
 )
+
+// InstructionSetMessage contains all opcode information.
+type InstructionSetMessage struct {
+	Type         string   `json:"type"`
+	Instructions []string `json:"instructions"`
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -211,11 +218,42 @@ func handleWebSocket(hub *Hub, appState *AppState, w http.ResponseWriter, r *htt
 	client := &Client{hub: hub, appState: appState, conn: conn, send: make(chan []byte, 256)}
 	client.hub.Register <- client
 
+	// Send the instruction set to the newly connected client.
+	if err := client.sendInstructionSet(); err != nil {
+		log.Printf("Error sending instruction set: %v", err)
+	}
+
 	// Allow collection of memory referenced by the caller by doing all work in
 	// new goroutines.
 	go client.writePump()
 	go client.readPump()
 }
+
+func (c *Client) sendInstructionSet() error {
+	// Create a slice of strings from the OpcodeNames array
+	instructionNames := make([]string, len(vm.OpcodeNames))
+	for i := range vm.OpcodeNames {
+		instructionNames[i] = vm.OpcodeNames[i]
+	}
+
+	msg := InstructionSetMessage{
+		Type:         "instruction_set",
+		Instructions: instructionNames,
+	}
+
+	encodedMsg, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	select {
+	case c.send <- encodedMsg:
+	default:
+		log.Println("Client send channel is full, dropping instruction set message.")
+	}
+	return nil
+}
+
 
 // serveIndex serves the main HTML file.
 func serveIndex(w http.ResponseWriter, r *http.Request) {
