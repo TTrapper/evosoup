@@ -24,6 +24,10 @@ const (
 	OR               // 12
 	JMP              // 13
 	JMP_NZ           // 14
+	PUSH             // 15
+	POP              // 16
+	CALL             // 17
+	RET              // 18
 	NumOpcodes
 )
 
@@ -43,12 +47,17 @@ var OpcodeNames = [...]string{
 	"OR",
 	"JMP",
 	"JMP_NZ",
+	"PUSH",
+	"POP",
+	"CALL",
+	"RET",
 }
 
 // IP represents an Instruction Pointer, our digital organism.
 type IP struct {
 	ID                      int
 	CurrentPtr              int32 // Current instruction pointer in the soup
+	StackPointer            int32 // Stack pointer in the soup
 	Steps                   int64 // Number of steps executed
 	Soup                    []int8
 	Use32BitAddressing      bool
@@ -60,6 +69,7 @@ type IP struct {
 type SavableIP struct {
 	ID                 int
 	CurrentPtr         int32
+	StackPointer       int32
 	Steps              int64
 	CurrentInstruction int8 // The raw instruction byte at CurrentPtr
 }
@@ -73,6 +83,7 @@ func (ip *IP) CurrentState() SavableIP {
 	return SavableIP{
 		ID:                 ip.ID,
 		CurrentPtr:         ip.CurrentPtr,
+		StackPointer:       ip.StackPointer,
 		Steps:              ip.Steps,
 		CurrentInstruction: ip.Soup[wrappedCurrentPtr],
 	}
@@ -84,6 +95,7 @@ func NewIP(id int, soup []int8, startPtr int32, use32BitAddressing bool, useRela
 		ID:                      id,
 		Soup:                    soup,
 		CurrentPtr:              startPtr,
+		StackPointer:            int32(len(soup)),
 		Use32BitAddressing:      use32BitAddressing,
 		UseRelativeAddressing:   useRelativeAddressing,
 		JumpZFailureProbability: jumpZFailureProbability,
@@ -133,6 +145,36 @@ func (ip *IP) Step() {
 		} else {
 			return wrapAddr(offset)
 		}
+	}
+
+	// --- Stack Helper Functions ---
+	push8 := func(val int8) {
+		ip.StackPointer--
+		ip.Soup[wrapAddr(ip.StackPointer)] = val
+	}
+
+	pop8 := func() int8 {
+		val := ip.Soup[wrapAddr(ip.StackPointer)]
+		ip.StackPointer++
+		return val
+	}
+
+	push32 := func(val int32) {
+		bytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(bytes, uint32(val))
+		push8(int8(bytes[0]))
+		push8(int8(bytes[1]))
+		push8(int8(bytes[2]))
+		push8(int8(bytes[3]))
+	}
+
+	pop32 := func() int32 {
+		b3 := pop8()
+		b2 := pop8()
+		b1 := pop8()
+		b0 := pop8()
+		bytes := []byte{byte(b0), byte(b1), byte(b2), byte(b3)}
+		return int32(binary.BigEndian.Uint32(bytes))
 	}
 
 	opcodeLocation := ip.CurrentPtr
@@ -232,6 +274,29 @@ func (ip *IP) Step() {
 			if ip.Soup[addr] != 0 {
 				ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
 			}
+		}
+	case PUSH:
+		offset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, offset)
+		val := ip.Soup[addr]
+		push8(val)
+	case POP:
+		offset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, offset)
+		val := pop8()
+		ip.Soup[addr] = val
+	case CALL:
+		jumpOffset := fetchImmediate()
+		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
+		if rand.Float64() >= prob {
+			push32(ip.CurrentPtr)
+			ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
+		}
+	case RET:
+		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
+		if rand.Float64() >= prob {
+			returnAddr := pop32()
+			ip.CurrentPtr = returnAddr
 		}
 	}
 	ip.Steps++
