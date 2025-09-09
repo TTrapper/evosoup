@@ -2,6 +2,8 @@
 
 EvoSoup is an experiment in digital evolution that attempts to simulate life at its most fundamental level. It creates a virtual world where the very definition of an "organism" is not predetermined, but must emerge from the underlying physics of the simulation.
 
+![EvoSoup Screenshot](evoscreenshot.png)
+
 ## The Concept
 
 The core of EvoSoup is a shared memory space called the "soup." This soup is initialized with a random sequence of simple instructions. A multitude of "Instruction Pointers" (IPs) concurrently execute this code. These IPs are not the organisms themselves; they are merely pointers, representing the focus of execution.
