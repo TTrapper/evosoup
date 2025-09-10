@@ -209,17 +209,6 @@ func (ip *IP) Step() {
 		value := fetch8()
 		addr := resolveAddress(opcodeLocation, offset)
 		ip.Soup[addr] ^= value
-	case JMP_Z:
-		addrOffset := fetchImmediate()
-		jumpOffset := fetchImmediate()
-		addr := resolveAddress(opcodeLocation, addrOffset)
-
-		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
-		if rand.Float64() >= prob {
-			if ip.Soup[addr] == 0 {
-				ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
-			}
-		}
 	case SHF:
 		// NOTE this op causes a 'grid of activity' when in 32-bit absolute mode
 		offset := fetchImmediate()
@@ -262,7 +251,18 @@ func (ip *IP) Step() {
 		jumpOffset := fetchImmediate()
 		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
 		if rand.Float64() >= prob {
-			ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
+			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
+		}
+	case JMP_Z:
+		addrOffset := fetchImmediate()
+		jumpOffset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, addrOffset)
+
+		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
+		if rand.Float64() >= prob {
+			if ip.Soup[addr] == 0 {
+				ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
+			}
 		}
 	case JMP_NZ:
 		addrOffset := fetchImmediate()
@@ -272,7 +272,7 @@ func (ip *IP) Step() {
 		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
 		if rand.Float64() >= prob {
 			if ip.Soup[addr] != 0 {
-				ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
+				ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 			}
 		}
 	case PUSH:
@@ -290,7 +290,7 @@ func (ip *IP) Step() {
 		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
 		if rand.Float64() >= prob {
 			push32(ip.CurrentPtr)
-			ip.CurrentPtr = wrapAddr(opcodeLocation + jumpOffset)
+			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 		}
 	case RET:
 		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
