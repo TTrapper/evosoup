@@ -23,6 +23,7 @@ const (
 type InstructionSetMessage struct {
 	Type         string   `json:"type"`
 	Instructions []string `json:"instructions"`
+	SoupSize     int      `json:"soupSize"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -239,6 +240,7 @@ func (c *Client) sendInstructionSet() error {
 	msg := InstructionSetMessage{
 		Type:         "instruction_set",
 		Instructions: instructionNames,
+		SoupSize:     SoupSize,
 	}
 
 	encodedMsg, err := json.Marshal(msg)

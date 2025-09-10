@@ -37,11 +37,17 @@
             border: none;
             border-radius: 3px;
             cursor: pointer;
+            width: 80px; /* Give button a fixed width */
         }
         #controls-buttons button:hover {
             background-color: #777;
         }
-        #paging-buttons button {
+        #paging-controls {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+        }
+        #paging-controls button {
             margin-right: 5px;
             padding: 8px 12px;
             background-color: #555;
@@ -50,8 +56,17 @@
             border-radius: 3px;
             cursor: pointer;
         }
-        #paging-buttons button:hover {
+        #paging-controls button:hover {
             background-color: #777;
+        }
+        #paging-controls button:disabled {
+            background-color: #444;
+            color: #888;
+            cursor: not-allowed;
+        }
+        #paging-controls span {
+            margin: 0 10px;
+            font-weight: bold;
         }
         #addressing-modes label {
             margin-right: 10px;
@@ -94,12 +109,12 @@
         <label for="jumpFailureProbability">Jump Failure Rate: <span id="jumpFailureProbabilityValue">50</span>%</label>
         <input type="range" id="jumpFailureProbability" min="0" max="100" step="1" value="50">
         <div id="controls-buttons">
-            <button id="pauseButton">Pause</button>
-            <button id="resumeButton">Resume</button>
+            <button id="playPauseButton">Pause</button>
         </div>
-        <div id="paging-buttons">
-            <button id="prevPage">Previous Page</button>
-            <button id="nextPage">Next Page</button>
+        <div id="paging-controls">
+            <button id="prevPage">&lt;</button>
+            <span id="pageInfo">Page ? / ?</span>
+            <button id="nextPage">&gt;</button>
         </div>
         <div id="addressing-modes">
             <label><input type="checkbox" id="32BitAddressing"> 32-bit Addressing</label>
@@ -250,6 +265,10 @@
         let highlightedIpPtr = -1; // Tracked IP pointer for highlighting
         let viewMode = 'opcode';
         let lastColorIndices = null;
+        let isPaused = false;
+        let soupTotalSize = 0;
+        let soupPageSize = 0;
+        let currentViewStartIndex = 0;
 
         // --- WebSocket Connection ---
         const socket = new WebSocket('ws://localhost:8080/ws');
@@ -297,6 +316,7 @@
                 const data = JSON.parse(event.data);
                 if (data.type === 'instruction_set') {
                     opcodeNames = data.instructions;
+                    soupTotalSize = data.soupSize;
                     // Combine names and colors
                     opcodeData = opcodeNames.map((name, index) => {
                         return {
@@ -322,14 +342,15 @@
 
                     // If follow IP is enabled, center the view on the IP
                     if (followIpCheckbox.checked && highlightedIpPtr !== -1 && soupWidth > 0) {
-                        const soupPageSize = soupWidth * soupHeight;
-                        const ipPageStartIndex = Math.floor(highlightedIpPtr / soupPageSize) * soupPageSize;
+                        const localSoupPageSize = soupWidth * soupHeight;
+                        const ipPageStartIndex = Math.floor(highlightedIpPtr / localSoupPageSize) * localSoupPageSize;
 
                         // Check if the IP has moved to a different page
                         if (ipPageStartIndex !== currentViewStartIndex) {
                             // Switch to the correct page
                             currentViewStartIndex = ipPageStartIndex;
                             sendViewStartIndex(currentViewStartIndex);
+                            updatePageInfo();
                         }
 
                         // Calculate position relative to the current page
@@ -344,6 +365,7 @@
                         offsetY = (canvas.height / 2) - (pixelY * targetZoom);
                         zoom = targetZoom;
                     }
+                    // Always request a redraw to show the highlight, even if not following
                     requestAnimationFrame(draw);
 
                     let instructionName = "UNKNOWN";
@@ -387,6 +409,7 @@
                 if (!imageData || soupWidth !== canvasSize) {
                     soupWidth = canvasSize;
                     soupHeight = canvasSize;
+                    soupPageSize = soupWidth * soupHeight;
                     offscreenCanvas.width = soupWidth;
                     offscreenCanvas.height = soupHeight;
                     imageData = offscreenCtx.createImageData(soupWidth, soupHeight);
@@ -395,7 +418,7 @@
                     offsetX = (canvasContainer.clientWidth - soupWidth * zoom) / 2;
                     offsetY = (canvasContainer.clientHeight - soupHeight * zoom) / 2;
                 }
-
+                updatePageInfo();
                 renderSoup();
             }
         };
@@ -504,8 +527,7 @@
         });
 
         // --- Command Buttons ---
-        const pauseButton = document.getElementById('pauseButton');
-        const resumeButton = document.getElementById('resumeButton');
+        const playPauseButton = document.getElementById('playPauseButton');
         const stepButton = document.getElementById('stepButton');
         const followIpCheckbox = document.getElementById('followIpCheckbox');
 
@@ -520,9 +542,7 @@
         const trackedIpCurrentPtrSpan = document.getElementById('trackedIpCurrentPtr');
         const trackedIpInstructionSpan = document.getElementById('trackedIpInstruction');
         const instructionHistoryDiv = document.getElementById('instructionHistory');
-
-        const StatsAndVisSize = 1024 * 1024; // Must match the Go constant
-        let currentViewStartIndex = 0;
+        const pageInfoSpan = document.getElementById('pageInfo');
 
         function showRightPanel() {
             rightPanel.style.display = 'block';
@@ -572,31 +592,51 @@
             }
         }
 
-        pauseButton.addEventListener('click', () => {
-            sendCommand('pause');
-            showRightPanel();
-            sendTrackingEnabled(true); // Enable tracking when paused
+        function updatePageInfo() {
+            if (!soupPageSize || !soupTotalSize) return;
+            const currentPage = (currentViewStartIndex / soupPageSize) + 1;
+            const totalPages = Math.ceil(soupTotalSize / soupPageSize);
+            pageInfoSpan.textContent = `Page ${currentPage} / ${totalPages}`;
+
+            prevPageButton.disabled = (currentPage <= 1);
+            nextPageButton.disabled = (currentPage >= totalPages);
+        }
+
+        playPauseButton.addEventListener('click', () => {
+            if (isPaused) {
+                sendCommand('resume');
+                hideRightPanel();
+                sendTrackingEnabled(false);
+                highlightedIpPtr = -1;
+                playPauseButton.textContent = 'Pause';
+            } else {
+                sendCommand('pause');
+                showRightPanel();
+                sendTrackingEnabled(true);
+                playPauseButton.textContent = 'Play';
+            }
+            isPaused = !isPaused;
         });
-        resumeButton.addEventListener('click', () => {
-            sendCommand('resume');
-            hideRightPanel();
-            sendTrackingEnabled(false); // Disable tracking when resumed
-            highlightedIpPtr = -1; // Clear highlight
-        });
+
         stepButton.addEventListener('click', () => sendCommand('step'));
 
         prevPageButton.addEventListener('click', () => {
-            currentViewStartIndex -= StatsAndVisSize;
-            if (currentViewStartIndex < 0) {
-                currentViewStartIndex = 0;
+            if (currentViewStartIndex > 0) {
+                currentViewStartIndex -= soupPageSize;
+                sendViewStartIndex(currentViewStartIndex);
+                updatePageInfo();
             }
-            sendViewStartIndex(currentViewStartIndex);
         });
 
         nextPageButton.addEventListener('click', () => {
-            currentViewStartIndex += StatsAndVisSize;
-            // We don't have SoupSize on the client, so we'll let the server clamp it.
-            sendViewStartIndex(currentViewStartIndex);
+            if (!soupTotalSize || !soupPageSize) return;
+            const totalPages = Math.ceil(soupTotalSize / soupPageSize);
+            const maxStartIndex = (totalPages - 1) * soupPageSize;
+            if (currentViewStartIndex < maxStartIndex) {
+                currentViewStartIndex += soupPageSize;
+                sendViewStartIndex(currentViewStartIndex);
+                updatePageInfo();
+            }
         });
 
         bit32AddressingCheckbox.addEventListener('change', (event) => {
