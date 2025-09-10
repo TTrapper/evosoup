@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/gob"
 	"encoding/json"
-	"log"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -41,10 +41,11 @@ type AppState struct {
 	// Visualization state
 	viewStartIndex int
 	viewEndIndex   int
+	visRequestChan chan struct{} // For on-demand visualization updates
 
 	// IP Tracking
 	trackingEnabled bool
-	ipStateChan chan vm.SavableIP
+	ipStateChan     chan vm.SavableIP
 }
 
 // NewAppState initializes a new simulation state.
@@ -59,6 +60,7 @@ func NewAppState() *AppState {
 		trackingEnabled:       false,
 		ipStateChan:           make(chan vm.SavableIP, 100), // Buffered channel for IP state updates
 		ipStopChan:            make(chan struct{}),
+		visRequestChan:        make(chan struct{}, 1),
 	}
 }
 
@@ -218,6 +220,12 @@ func (s *AppState) Pause() {
 	if atomic.CompareAndSwapInt32(&s.paused, 0, 1) { // If was running (0), set to paused (1)
 		close(s.ipStopChan) // Signal all runIP goroutines to stop
 		s.ipWg.Wait()       // Wait for all runIP goroutines to finish
+
+		// Request a visualization update to show the final state.
+		select {
+		case s.visRequestChan <- struct{}{}:
+		default:
+		}
 	} else {
 		log.Println("Simulation is already paused.")
 	}
@@ -273,6 +281,12 @@ func (s *AppState) SetViewStartIndex(index int) {
 	}
 	s.viewStartIndex = index
 	s.viewEndIndex = s.viewStartIndex + StatsAndVisSize
+
+	// Request a visualization update, especially important when paused.
+	select {
+	case s.visRequestChan <- struct{}{}:
+	default:
+	}
 }
 
 // SetRelativeAddressing sets the relative addressing mode.
@@ -295,13 +309,19 @@ func (s *AppState) Set32BitAddressing(enabled bool) {
 	})
 }
 
-
-
 // SetTrackingEnabled sets the tracking state of the first IP.
 func (s *AppState) SetTrackingEnabled(enabled bool) {
 	s.trackingEnabled = enabled
 	if enabled {
 		log.Println("IP tracking enabled.")
+		// When tracking is enabled, immediately send the current state of the tracked IP.
+		if val, ok := s.population.Load(1); ok { // Always track IP with ID 1
+			ip := val.(*vm.IP)
+			log.Printf("Sending initial state for tracked IP %d.", ip.ID)
+			s.ipStateChan <- ip.CurrentState()
+		} else {
+			log.Printf("Tracked IP with ID 1 not found for initial state send.")
+		}
 	} else {
 		log.Println("IP tracking disabled.")
 	}
@@ -323,9 +343,9 @@ func (s *AppState) RunVisualization(hub *Hub) {
 	ticker := time.NewTicker(time.Second / TargetFPS)
 	defer ticker.Stop()
 
-	currentIndices := make([]byte, StatsAndVisSize) // Use StatsAndVisSize for the visualization
+	currentIndices := make([]byte, StatsAndVisSize) // Allocate once
 
-	for range ticker.C {
+	sendFrame := func() {
 		// Ensure viewStartIndex and viewEndIndex are within bounds
 		currentViewStartIndex := s.viewStartIndex
 		currentViewEndIndex := s.viewEndIndex
@@ -345,6 +365,19 @@ func (s *AppState) RunVisualization(hub *Hub) {
 
 		// Send the raw byte slice to the hub's public broadcast channel.
 		hub.Broadcast <- currentIndices
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			if atomic.LoadInt32(&s.paused) == 0 {
+				sendFrame()
+			}
+		case <-s.visRequestChan:
+			// Always send a frame on request. This is for paging when paused,
+			// or for the initial frame on pause.
+			sendFrame()
+		}
 	}
 }
 
@@ -367,7 +400,7 @@ func (s *AppState) RunStatistics(hub *Hub) {
 				totalSteps += ip.Steps
 				return true
 			})
-			var stepsPerSecond = int64(0)
+			var stepsPerSecond int64 = 0
 //			var stepsPerSecond = 1000000 * totalSteps / atomic.LoadInt64(&s.timeElapsed)
 
 			// Soup Entropy

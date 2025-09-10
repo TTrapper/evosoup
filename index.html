@@ -322,8 +322,20 @@
 
                     // If follow IP is enabled, center the view on the IP
                     if (followIpCheckbox.checked && highlightedIpPtr !== -1 && soupWidth > 0) {
-                        const pixelX = highlightedIpPtr % soupWidth;
-                        const pixelY = Math.floor(highlightedIpPtr / soupWidth);
+                        const soupPageSize = soupWidth * soupHeight;
+                        const ipPageStartIndex = Math.floor(highlightedIpPtr / soupPageSize) * soupPageSize;
+
+                        // Check if the IP has moved to a different page
+                        if (ipPageStartIndex !== currentViewStartIndex) {
+                            // Switch to the correct page
+                            currentViewStartIndex = ipPageStartIndex;
+                            sendViewStartIndex(currentViewStartIndex);
+                        }
+
+                        // Calculate position relative to the current page
+                        const relativePtr = highlightedIpPtr - currentViewStartIndex;
+                        const pixelX = relativePtr % soupWidth;
+                        const pixelY = Math.floor(relativePtr / soupWidth);
 
                         const targetZoom = 16; // A good zoom level to see the IP
 
@@ -331,8 +343,8 @@
                         offsetX = (canvas.width / 2) - (pixelX * targetZoom);
                         offsetY = (canvas.height / 2) - (pixelY * targetZoom);
                         zoom = targetZoom;
-                        requestAnimationFrame(draw);
                     }
+                    requestAnimationFrame(draw);
 
                     let instructionName = "UNKNOWN";
                     let color = [128, 128, 128, 255]; // Default gray
