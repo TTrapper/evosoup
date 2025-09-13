@@ -175,7 +175,7 @@ func (ip *IP) Step() {
 	opcodeLocation := ip.CurrentPtr
 
 	// --- Instruction Execution ---
-	opcode := ((fetch8())%(NumOpcodes) + (NumOpcodes)) % (NumOpcodes)
+	opcode := fetch8()
 
 	switch opcode {
 	case NOOP:

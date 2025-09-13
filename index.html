@@ -215,8 +215,12 @@
                         color = [128, 128, 128, 255]; // Default gray if no data
                     } else {
                         const NumOpcodes = opcodeData.length;
-                        const colorIndex = ((int8Value % NumOpcodes) + NumOpcodes) % NumOpcodes;
-                        color = opcodeData[colorIndex].color;
+                        if (byteValue < NumOpcodes) {
+                            color = opcodeData[byteValue].color;
+                        } else {
+                            // Not a valid instruction, color as NOOP (index 0)
+                            color = opcodeData[0].color;
+                        }
                     }
                 } else { // heatmap
                     color = getHeatmapColor(int8Value);
@@ -380,8 +384,13 @@
 
                     if (opcodeData && opcodeData.length > 0) {
                         const instructionValue = data.CurrentInstruction;
-                        const colorIndex = (instructionValue % opcodeData.length + opcodeData.length) % opcodeData.length;
-                        const opcode = opcodeData[colorIndex];
+                        const NumOpcodes = opcodeData.length;
+                        let opcode;
+                        if (instructionValue >= 0 && instructionValue < NumOpcodes) {
+                            opcode = opcodeData[instructionValue];
+                        } else {
+                            opcode = opcodeData[0];
+                        }
                         instructionName = opcode.name;
                         color = opcode.color;
                     }
