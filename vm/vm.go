@@ -2,9 +2,6 @@ package vm
 
 import (
 	"encoding/binary"
-	"math"
-	"math/rand"
-	"sync/atomic"
 )
 
 // --- Instruction Set Opcodes ---
@@ -62,7 +59,6 @@ type IP struct {
 	Soup                    []int8
 	Use32BitAddressing      bool
 	UseRelativeAddressing   bool
-	JumpZFailureProbability *uint64
 }
 
 // SavableIP defines the data for an IP that can be saved in a snapshot.
@@ -90,7 +86,7 @@ func (ip *IP) CurrentState() SavableIP {
 }
 
 // NewIP creates a new, minimal instruction pointer.
-func NewIP(id int, soup []int8, startPtr int32, use32BitAddressing bool, useRelativeAddressing bool, jumpZFailureProbability *uint64) *IP {
+func NewIP(id int, soup []int8, startPtr int32, use32BitAddressing bool, useRelativeAddressing bool) *IP {
 	ip := &IP{
 		ID:                      id,
 		Soup:                    soup,
@@ -98,7 +94,6 @@ func NewIP(id int, soup []int8, startPtr int32, use32BitAddressing bool, useRela
 		StackPointer:            int32(len(soup)),
 		Use32BitAddressing:      use32BitAddressing,
 		UseRelativeAddressing:   useRelativeAddressing,
-		JumpZFailureProbability: jumpZFailureProbability,
 	}
 	return ip
 }
@@ -249,31 +244,22 @@ func (ip *IP) Step() {
 		ip.Soup[addr] |= value
 	case JMP:
 		jumpOffset := fetchImmediate()
-		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
-		if rand.Float64() >= prob {
-			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
-		}
+		ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 	case JMP_Z:
 		addrOffset := fetchImmediate()
 		jumpOffset := fetchImmediate()
 		addr := resolveAddress(opcodeLocation, addrOffset)
 
-		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
-		if rand.Float64() >= prob {
-			if ip.Soup[addr] == 0 {
-				ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
-			}
+		if ip.Soup[addr] == 0 {
+			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 		}
 	case JMP_NZ:
 		addrOffset := fetchImmediate()
 		jumpOffset := fetchImmediate()
 		addr := resolveAddress(opcodeLocation, addrOffset)
 
-		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
-		if rand.Float64() >= prob {
-			if ip.Soup[addr] != 0 {
-				ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
-			}
+		if ip.Soup[addr] != 0 {
+			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 		}
 	case PUSH:
 		offset := fetchImmediate()
@@ -287,17 +273,11 @@ func (ip *IP) Step() {
 		ip.Soup[addr] = val
 	case CALL:
 		jumpOffset := fetchImmediate()
-		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
-		if rand.Float64() >= prob {
-			push32(ip.CurrentPtr)
-			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
-		}
+		push32(ip.CurrentPtr)
+		ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 	case RET:
-		prob := math.Float64frombits(atomic.LoadUint64(ip.JumpZFailureProbability))
-		if rand.Float64() >= prob {
-			returnAddr := pop32()
-			ip.CurrentPtr = returnAddr
-		}
+		returnAddr := pop32()
+		ip.CurrentPtr = returnAddr
 	}
 	ip.Steps++
 }

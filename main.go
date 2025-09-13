@@ -72,7 +72,7 @@ func main() {
 	}
 
 	// --- Global Jump Timer Goroutine ---
-	go appState.runJumpTimer()
+	go appState.runCosmicRaySimulator()
 
 	// --- 5. Launch IPs ---
 	appState.LaunchIPs()
@@ -117,8 +117,8 @@ func main() {
 				} else {
 					appState.Resume()
 				}
-			case jumpInterval := <-hub.SetJumpInterval:
-				appState.SetJumpInterval(int64(jumpInterval))
+			case cosmicRayRate := <-hub.SetCosmicRayRate:
+				appState.SetCosmicRayRate(cosmicRayRate)
 			}
 		}
 	}

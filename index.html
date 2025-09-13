@@ -106,8 +106,8 @@
         <p>Generation: <span id="gen">0</span></p>
         <p>Steps/sec: <span id="steps">0</span></p>
         <p>Entropy: <span id="entropy">0.00</span></p>
-        <label for="jumpFailureProbability">Jump Failure Rate: <span id="jumpFailureProbabilityValue">50</span>%</label>
-        <input type="range" id="jumpFailureProbability" min="0" max="100" step="1" value="50">
+        <label for="cosmicRayRate">Cosmic Ray Rate: <span id="cosmicRayRateValue">50</span>%</label>
+        <input type="range" id="cosmicRayRate" min="0" max="100" step="1" value="50">
         <div id="controls-buttons">
             <button id="playPauseButton">Pause</button>
         </div>
@@ -235,8 +235,8 @@
         const genSpan = document.getElementById('gen');
         const stepsSpan = document.getElementById('steps');
         const entropySpan = document.getElementById('entropy');
-        const jumpFailureProbabilitySlider = document.getElementById('jumpFailureProbability');
-        const jumpFailureProbabilityValueSpan = document.getElementById('jumpFailureProbabilityValue');
+        const cosmicRayRateSlider = document.getElementById('cosmicRayRate');
+        const cosmicRayRateValueSpan = document.getElementById('cosmicRayRateValue');
         const opcodeLegendDiv = document.getElementById('opcode-legend');
 
         function generateOpcodeLegend() {
@@ -514,11 +514,11 @@
 
 
         // Jump Failure Probability Slider
-        jumpFailureProbabilitySlider.addEventListener('input', (e) => {
+        cosmicRayRateSlider.addEventListener('input', (e) => {
             const probability = parseInt(e.target.value);
-            jumpFailureProbabilityValueSpan.textContent = probability;
+            cosmicRayRateValueSpan.textContent = probability;
             const message = {
-                type: "set_jump_failure_probability",
+                type: "set_cosmic_ray_rate",
                 value: probability
             };
             if (socket.readyState === WebSocket.OPEN) {
@@ -674,9 +674,9 @@
             console.log("WebSocket connection established.");
             // Set initial jump failure probability on the server and UI
             const initialProbability = 50; // Default value
-            jumpFailureProbabilitySlider.value = initialProbability;
-            jumpFailureProbabilityValueSpan.textContent = initialProbability;
-            jumpFailureProbabilitySlider.dispatchEvent(new Event('input'));
+            cosmicRayRateSlider.value = initialProbability;
+            cosmicRayRateValueSpan.textContent = initialProbability;
+            cosmicRayRateSlider.dispatchEvent(new Event('input'));
         };
 
         socket.onerror = function(error) {

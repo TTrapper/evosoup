@@ -25,10 +25,9 @@ type AppState struct {
 	generation              int
 	entropies               []float64
 	timeElapsed             int64 // In microseconds
-	jumpZFailureProbability uint64
+	cosmicRayRate           uint64
 
 	// Control state
-	jumpInterval        int64
 	ipCount             int32
 	paused              int32 // Atomic boolean: 0 for running, 1 for paused
 	Use32BitAddressing  bool
@@ -52,7 +51,6 @@ type AppState struct {
 func NewAppState() *AppState {
 	return &AppState{
 		soup:                  make([]int8, SoupSize),
-		jumpInterval:          1, // Default jump interval
 		viewStartIndex:        0,
 		viewEndIndex:          StatsAndVisSize,
 		Use32BitAddressing:    false, // Default from vm/vm.go
@@ -92,7 +90,7 @@ func (s *AppState) loadSnapshot(filename string) error {
 	atomic.StoreInt32(&s.ipCount, 0)
 
 	for _, savableIP := range state.IPs {
-		ip := vm.NewIP(savableIP.ID, s.soup, savableIP.CurrentPtr, s.Use32BitAddressing, s.UseRelativeAddressing, &s.jumpZFailureProbability)
+		ip := vm.NewIP(savableIP.ID, s.soup, savableIP.CurrentPtr, s.Use32BitAddressing, s.UseRelativeAddressing)
 		s.population.Store(ip.ID, ip)
 		atomic.AddInt32(&s.ipCount, 1)
 	}
@@ -142,7 +140,7 @@ func (s *AppState) initializeSimulation() {
 	for i := 0; i < InitialNumIPs; i++ {
 		startPtr := rand.Int31n(SoupSize)
 		newID := atomic.AddInt32(&s.nextIPID, 1)
-		ip := vm.NewIP(int(newID), s.soup, startPtr, s.Use32BitAddressing, s.UseRelativeAddressing, &s.jumpZFailureProbability)
+		ip := vm.NewIP(int(newID), s.soup, startPtr, s.Use32BitAddressing, s.UseRelativeAddressing)
 		s.population.Store(ip.ID, ip)
 		atomic.AddInt32(&s.ipCount, 1)
 	}
@@ -185,32 +183,29 @@ func (s *AppState) LaunchIPs() {
 	})
 }
 
-// SetJumpInterval sets the interval for random jumps.
-func (s *AppState) SetJumpInterval(interval int64) {
-	atomic.StoreInt64(&s.jumpInterval, interval)
+// SetCosmicRayRate sets the rate for cosmic rays.
+func (s *AppState) SetCosmicRayRate(rate float64) {
+	atomic.StoreUint64(&s.cosmicRayRate, uint64(rate))
 }
 
-// runJumpTimer manages the JMP_Z failure probability.
-func (s *AppState) runJumpTimer() {
+// runCosmicRaySimulator picks a random index in the Soup and flips a bit.
+func (s *AppState) runCosmicRaySimulator() {
+
 	for {
 		if atomic.LoadInt32(&s.paused) == 1 {
 			time.Sleep(100 * time.Millisecond) // Prevent busy-waiting
 			continue
 		}
-
-		currentInterval := atomic.LoadInt64(&s.jumpInterval)
-		var prob float64
-		if currentInterval > 0 {
-			prob = float64(currentInterval) / 100.0
-			if prob > 1.0 {
-				prob = 1.0
+		currentRate := atomic.LoadUint64(&s.cosmicRayRate)
+		if currentRate > 0 {
+			p := float64(currentRate) / 10000.0
+			if rand.Float64() < p {
+				// Pick a random index and flip a random bit.
+				index := rand.Intn(len(s.soup))
+				bit := uint(rand.Intn(8))
+				s.soup[index] ^= (1 << bit)
 			}
-		} else {
-			prob = 0.0
 		}
-
-		atomic.StoreUint64(&s.jumpZFailureProbability, math.Float64bits(prob))
-		time.Sleep(100 * time.Millisecond) // Avoid busy-looping
 	}
 }
 

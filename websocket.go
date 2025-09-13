@@ -75,13 +75,13 @@ func (c *Client) readPump() {
 
 		// Route the message based on its type.
 		switch msg.Type {
-		case "set_jump_failure_probability":
-			log.Printf("Received set_jump_failure_probability: %f", msg.Value)
+		case "set_cosmic_ray_rate":
+			log.Printf("Received set_cosmic_ray_rate: %f", msg.Value)
 			// Safely send to the hub's channel.
 			select {
-			case c.hub.SetJumpInterval <- msg.Value:
+			case c.hub.SetCosmicRayRate <- msg.Value:
 			default:
-				log.Println("Jump rate channel is full, dropping message.")
+				log.Println("Cosmic ray rate channel is full, dropping message.")
 			}
 		case "command":
 			log.Printf("Received command: %s", msg.Command)
@@ -157,7 +157,7 @@ type Hub struct {
 	Broadcast   chan []byte
 	Register    chan *Client
 	Unregister  chan *Client
-	SetJumpInterval chan float64
+	SetCosmicRayRate chan float64
 	Pause       chan bool
 }
 
@@ -178,7 +178,7 @@ func NewHub() *Hub {
 		Register:    make(chan *Client),
 		Unregister:  make(chan *Client),
 		clients:     make(map[*Client]bool),
-		SetJumpInterval: make(chan float64, 8),
+		SetCosmicRayRate: make(chan float64, 8),
 		Pause:       make(chan bool, 8),
 	}
 }
