@@ -107,7 +107,7 @@
         <p>Steps/sec: <span id="steps">0</span></p>
         <p>Entropy: <span id="entropy">0.00</span></p>
         <label for="cosmicRayRate">Cosmic Ray Rate: <span id="cosmicRayRateValue">50</span>%</label>
-        <input type="range" id="cosmicRayRate" min="0" max="100" step="1" value="50">
+        <input type="range" id="cosmicRayRate" min="0" max="1000" step="1" value="500">
         <div id="controls-buttons">
             <button id="playPauseButton">Pause</button>
         </div>
@@ -238,6 +238,13 @@
         const cosmicRayRateSlider = document.getElementById('cosmicRayRate');
         const cosmicRayRateValueSpan = document.getElementById('cosmicRayRateValue');
         const opcodeLegendDiv = document.getElementById('opcode-legend');
+
+        function formatProbability(p) {
+            p = p * 100
+            if (p === 0) return "0.00";
+            if (p < 0.001) return p.toExponential(2);
+            return p.toFixed(4);
+        }
 
         function generateOpcodeLegend() {
             opcodeLegendDiv.innerHTML = ''; // Clear existing legend
@@ -515,8 +522,20 @@
 
         // Jump Failure Probability Slider
         cosmicRayRateSlider.addEventListener('input', (e) => {
-            const probability = parseInt(e.target.value);
-            cosmicRayRateValueSpan.textContent = probability;
+            const sliderValue = parseInt(e.target.value);
+            let probability = 0;
+            if (sliderValue > 0) {
+                const minp = 0.0001;
+                const maxp = 1.0;
+                // The slider scale is logarithmic
+                const minv = Math.log(minp);
+                const maxv = Math.log(maxp);
+                // We use a range of 1-1000 for the slider
+                const scale = (maxv - minv) / (1000 - 1);
+                probability = Math.exp(minv + scale * (sliderValue - 1));
+            }
+
+            cosmicRayRateValueSpan.textContent = formatProbability(probability);
             const message = {
                 type: "set_cosmic_ray_rate",
                 value: probability
@@ -672,10 +691,9 @@
 
         socket.onopen = function(event) {
             console.log("WebSocket connection established.");
-            // Set initial jump failure probability on the server and UI
-            const initialProbability = 50; // Default value
-            cosmicRayRateSlider.value = initialProbability;
-            cosmicRayRateValueSpan.textContent = initialProbability;
+            // Set initial cosmic ray rate on the server and UI
+            const initialSliderValue = 500; // Default value on a 0-1000 scale
+            cosmicRayRateSlider.value = initialSliderValue;
             cosmicRayRateSlider.dispatchEvent(new Event('input'));
         };
 

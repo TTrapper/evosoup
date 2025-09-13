@@ -185,7 +185,7 @@ func (s *AppState) LaunchIPs() {
 
 // SetCosmicRayRate sets the rate for cosmic rays.
 func (s *AppState) SetCosmicRayRate(rate float64) {
-	atomic.StoreUint64(&s.cosmicRayRate, uint64(rate))
+	atomic.StoreUint64(&s.cosmicRayRate, math.Float64bits(rate))
 }
 
 // runCosmicRaySimulator picks a random index in the Soup and flips a bit.
@@ -196,16 +196,14 @@ func (s *AppState) runCosmicRaySimulator() {
 			time.Sleep(100 * time.Millisecond) // Prevent busy-waiting
 			continue
 		}
-		currentRate := atomic.LoadUint64(&s.cosmicRayRate)
-		if currentRate > 0 {
-			p := float64(currentRate) / 10000.0
-			if rand.Float64() < p {
+		currentRateBits := atomic.LoadUint64(&s.cosmicRayRate)
+		p := math.Float64frombits(currentRateBits)
+		if p > 0 && rand.Float64() < p {
 				// Pick a random index and flip a random bit.
 				index := rand.Intn(len(s.soup))
 				bit := uint(rand.Intn(8))
 				s.soup[index] ^= (1 << bit)
 			}
-		}
 	}
 }
 
