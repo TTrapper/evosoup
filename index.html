@@ -107,7 +107,7 @@
         <p>Steps/sec: <span id="steps">0</span></p>
         <p>Entropy: <span id="entropy">0.00</span></p>
         <label for="cosmicRayRate">Cosmic Ray Rate: <span id="cosmicRayRateValue">50</span>%</label>
-        <input type="range" id="cosmicRayRate" min="0" max="1000" step="1" value="500">
+        <input type="range" id="cosmicRayRate" min="0" max="1000" step="1" value="0">
         <div id="controls-buttons">
             <button id="playPauseButton">Pause</button>
         </div>
@@ -117,7 +117,7 @@
             <button id="nextPage">&gt;</button>
         </div>
         <div id="addressing-modes">
-            <label><input type="checkbox" id="32BitAddressing"> 32-bit Addressing</label>
+            <label><input type="checkbox" id="32BitAddressing" checked> 32-bit Addressing</label>
             <label><input type="checkbox" id="relativeAddressing" checked> Relative Addressing</label>
         </div>
         <div id="view-mode-controls">
@@ -696,7 +696,7 @@
         socket.onopen = function(event) {
             console.log("WebSocket connection established.");
             // Set initial cosmic ray rate on the server and UI
-            const initialSliderValue = 500; // Default value on a 0-1000 scale
+            const initialSliderValue = 0; // Default value on a 0-1000 scale
             cosmicRayRateSlider.value = initialSliderValue;
             cosmicRayRateSlider.dispatchEvent(new Event('input'));
         };
@@ -706,4 +706,6 @@
         };
     </script>
 </body>
+</html>
+body>
 </html>

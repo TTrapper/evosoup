@@ -53,8 +53,8 @@ func NewAppState() *AppState {
 		soup:                  make([]int8, SoupSize),
 		viewStartIndex:        0,
 		viewEndIndex:          StatsAndVisSize,
-		Use32BitAddressing:    false, // Default from vm/vm.go
-		UseRelativeAddressing: true,  // Default from vm/vm.go
+		Use32BitAddressing:    true,
+		UseRelativeAddressing: true,
 		trackingEnabled:       false,
 		ipStateChan:           make(chan vm.SavableIP, 100), // Buffered channel for IP state updates
 		ipStopChan:            make(chan struct{}),
