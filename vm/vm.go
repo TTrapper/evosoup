@@ -2,6 +2,7 @@ package vm
 
 import (
 	"encoding/binary"
+	"math/rand"
 )
 
 // --- Instruction Set Opcodes ---
@@ -14,17 +15,12 @@ const (
 	XOR              // 5
 	SHF              // 6
 	INV              // 7
-	JMP_Z            // 8
-	ADD              // 9
-	SUB              // 10
-	AND              // 11
-	OR               // 12
-	JMP              // 13
-	JMP_NZ           // 14
-	PUSH             // 15
-	POP              // 16
-	CALL             // 17
-	RET              // 18
+	ADD              // 8
+	SUB              // 9
+	AND              // 10
+	OR               // 11
+	JMP_Z            // 12
+	JMP_NZ           // 13
 	NumOpcodes
 )
 
@@ -37,17 +33,12 @@ var OpcodeNames = [...]string{
 	"XOR",
 	"SHF",
 	"INV",
-	"JMP_Z",
 	"ADD",
 	"SUB",
 	"AND",
 	"OR",
-	"JMP",
+	"JMP_Z",
 	"JMP_NZ",
-	"PUSH",
-	"POP",
-	"CALL",
-	"RET",
 }
 
 // IP represents an Instruction Pointer, our digital organism.
@@ -142,35 +133,6 @@ func (ip *IP) Step() {
 		}
 	}
 
-	// --- Stack Helper Functions ---
-	push8 := func(val int8) {
-		ip.StackPointer--
-		ip.Soup[wrapAddr(ip.StackPointer)] = val
-	}
-
-	pop8 := func() int8 {
-		val := ip.Soup[wrapAddr(ip.StackPointer)]
-		ip.StackPointer++
-		return val
-	}
-
-	push32 := func(val int32) {
-		bytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(bytes, uint32(val))
-		push8(int8(bytes[0]))
-		push8(int8(bytes[1]))
-		push8(int8(bytes[2]))
-		push8(int8(bytes[3]))
-	}
-
-	pop32 := func() int32 {
-		b3 := pop8()
-		b2 := pop8()
-		b1 := pop8()
-		b0 := pop8()
-		bytes := []byte{byte(b0), byte(b1), byte(b2), byte(b3)}
-		return int32(binary.BigEndian.Uint32(bytes))
-	}
 
 	opcodeLocation := ip.CurrentPtr
 
@@ -242,42 +204,32 @@ func (ip *IP) Step() {
 		value := fetch8()
 		addr := resolveAddress(opcodeLocation, offset)
 		ip.Soup[addr] |= value
-	case JMP:
-		jumpOffset := fetchImmediate()
-		ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 	case JMP_Z:
 		addrOffset := fetchImmediate()
-		jumpOffset := fetchImmediate()
 		addr := resolveAddress(opcodeLocation, addrOffset)
 
 		if ip.Soup[addr] == 0 {
-			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
+			var randomJumpOffset int32
+			if ip.Use32BitAddressing {
+				randomJumpOffset = int32(rand.Uint32())
+			} else {
+				randomJumpOffset = int32(int8(rand.Intn(256)))
+			}
+			ip.CurrentPtr = resolveAddress(opcodeLocation, randomJumpOffset)
 		}
 	case JMP_NZ:
 		addrOffset := fetchImmediate()
-		jumpOffset := fetchImmediate()
 		addr := resolveAddress(opcodeLocation, addrOffset)
 
 		if ip.Soup[addr] != 0 {
-			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
+			var randomJumpOffset int32
+			if ip.Use32BitAddressing {
+				randomJumpOffset = int32(rand.Uint32())
+			} else {
+				randomJumpOffset = int32(int8(rand.Intn(256)))
+			}
+			ip.CurrentPtr = resolveAddress(opcodeLocation, randomJumpOffset)
 		}
-	case PUSH:
-		offset := fetchImmediate()
-		addr := resolveAddress(opcodeLocation, offset)
-		val := ip.Soup[addr]
-		push8(val)
-	case POP:
-		offset := fetchImmediate()
-		addr := resolveAddress(opcodeLocation, offset)
-		val := pop8()
-		ip.Soup[addr] = val
-	case CALL:
-		jumpOffset := fetchImmediate()
-		push32(ip.CurrentPtr)
-		ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
-	case RET:
-		returnAddr := pop32()
-		ip.CurrentPtr = returnAddr
 	}
 	ip.Steps++
 }
