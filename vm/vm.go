@@ -2,32 +2,34 @@ package vm
 
 import (
 	"encoding/binary"
-	"math/rand"
 )
 
 // --- Instruction Set Opcodes ---
 const (
 	NOOP int8 = iota // 0
-	MOV              // 1
-	WRT              // 2
-	INC              // 3
-	DEC              // 4
-	XOR              // 5
-	SHF              // 6
-	INV              // 7
-	ADD              // 8
-	SUB              // 9
-	AND              // 10
-	OR               // 11
-	JMP_Z            // 12
-	JMP_NZ           // 13
+	PUSH_I           // 1
+	POP_A            // 2
+	PUSH_A           // 3
+	INC              // 4
+	DEC              // 5
+	XOR              // 6
+	SHF              // 7
+	INV              // 8
+	ADD              // 9
+	SUB              // 10
+	AND              // 11
+	OR               // 12
+	JMP_Z            // 13
+	JMP_NZ           // 14
+	SET_SP           // 15
 	NumOpcodes
 )
 
 var OpcodeNames = [...]string{
 	"NOOP",
-	"MOV",
-	"WRT",
+	"PUSH_I",
+	"POP_A",
+	"PUSH_A",
 	"INC",
 	"DEC",
 	"XOR",
@@ -39,6 +41,7 @@ var OpcodeNames = [...]string{
 	"OR",
 	"JMP_Z",
 	"JMP_NZ",
+	"SET_SP",
 }
 
 // IP represents an Instruction Pointer, our digital organism.
@@ -98,6 +101,29 @@ func (ip *IP) Step() {
 		return (addr%soupLen + soupLen) % soupLen
 	}
 
+	// Pushes a value onto the stack.
+	push := func(val int8) {
+		ip.StackPointer--
+		ip.Soup[wrapAddr(ip.StackPointer)] = val
+	}
+
+	// Pops a value from the stack.
+	pop := func() int8 {
+		val := ip.Soup[wrapAddr(ip.StackPointer)]
+		ip.StackPointer++
+		return val
+	}
+
+	// Pops 4 bytes from the stack and converts them to a 32-bit integer.
+	pop32 := func() int32 {
+		b4 := byte(pop())
+		b3 := byte(pop())
+		b2 := byte(pop())
+		b1 := byte(pop())
+		byteSlice := []byte{b1, b2, b3, b4}
+		return int32(binary.BigEndian.Uint32(byteSlice))
+	}
+
 	// Fetches 1 byte from the instruction stream and advances the pointer.
 	fetch8 := func() int8 {
 		val := ip.Soup[wrapAddr(ip.CurrentPtr)]
@@ -142,94 +168,76 @@ func (ip *IP) Step() {
 	switch opcode {
 	case NOOP:
 		// Does nothing.
-	case MOV:
-		srcOffset := fetchImmediate()
-		destOffset := fetchImmediate()
-		srcAddr := resolveAddress(opcodeLocation, srcOffset)
-		destAddr := resolveAddress(opcodeLocation, destOffset)
-		ip.Soup[destAddr] = ip.Soup[srcAddr]
-	case WRT:
-		destOffset := fetchImmediate()
-		value := fetch8()
-		destAddr := resolveAddress(opcodeLocation, destOffset)
-		ip.Soup[destAddr] = value
+	case PUSH_I:
+		val := fetch8()
+		push(val)
+	case POP_A:
+		offset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, offset)
+		ip.Soup[addr] = pop()
+	case PUSH_A:
+		offset := fetchImmediate()
+		addr := resolveAddress(opcodeLocation, offset)
+		push(ip.Soup[addr])
 	case INC:
-		offset := fetchImmediate()
-		addr := resolveAddress(opcodeLocation, offset)
-		ip.Soup[addr]++
+		val := pop()
+		push(val + 1)
 	case DEC:
-		offset := fetchImmediate()
-		addr := resolveAddress(opcodeLocation, offset)
-		ip.Soup[addr]--
+		val := pop()
+		push(val - 1)
 	case XOR:
-		offset := fetchImmediate()
-		value := fetch8()
-		addr := resolveAddress(opcodeLocation, offset)
-		ip.Soup[addr] ^= value
+		val2 := pop()
+		val1 := pop()
+		push(val1 ^ val2)
 	case SHF:
-		// NOTE this op causes a 'grid of activity' when in 32-bit absolute mode
-		offset := fetchImmediate()
 		shiftByte := fetch8()
+		val := pop()
 		direction := (shiftByte >> 7) & 1 // Use the MSB for direction
 		amount := uint(shiftByte & 0x7F)    // Use the other 7 bits for amount
 
-		addr := resolveAddress(opcodeLocation, offset)
-
 		if direction == 0 { // Left shift
-			ip.Soup[addr] <<= amount
+			val <<= amount
 		} else { // Right shift
-			ip.Soup[addr] >>= amount
+			val >>= amount
 		}
+		push(val)
 	case INV:
-		offset := fetchImmediate()
-		addr := resolveAddress(opcodeLocation, offset)
-		ip.Soup[addr] = ^ip.Soup[addr]
+		val := pop()
+		push(^val)
 	case ADD:
-		offset := fetchImmediate()
-		value := fetch8()
-		addr := resolveAddress(opcodeLocation, offset)
-		ip.Soup[addr] += value
+		val2 := pop()
+		val1 := pop()
+		push(val1 + val2)
 	case SUB:
-		offset := fetchImmediate()
-		value := fetch8()
-		addr := resolveAddress(opcodeLocation, offset)
-		ip.Soup[addr] -= value
+		val2 := pop()
+		val1 := pop()
+		push(val1 - val2)
 	case AND:
-		offset := fetchImmediate()
-		value := fetch8()
-		addr := resolveAddress(opcodeLocation, offset)
-		ip.Soup[addr] &= value
+		val2 := pop()
+		val1 := pop()
+		push(val1 & val2)
 	case OR:
-		offset := fetchImmediate()
-		value := fetch8()
-		addr := resolveAddress(opcodeLocation, offset)
-		ip.Soup[addr] |= value
+		val2 := pop()
+		val1 := pop()
+		push(val1 | val2)
 	case JMP_Z:
-		addrOffset := fetchImmediate()
-		addr := resolveAddress(opcodeLocation, addrOffset)
-
-		if ip.Soup[addr] == 0 {
-			var randomJumpOffset int32
-			if ip.Use32BitAddressing {
-				randomJumpOffset = int32(rand.Uint32())
-			} else {
-				randomJumpOffset = int32(int8(rand.Intn(256)))
-			}
-			ip.CurrentPtr = resolveAddress(opcodeLocation, randomJumpOffset)
+		jumpOffset := fetchImmediate()
+		if pop() == 0 {
+			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 		}
 	case JMP_NZ:
-		addrOffset := fetchImmediate()
-		addr := resolveAddress(opcodeLocation, addrOffset)
-
-		if ip.Soup[addr] != 0 {
-			var randomJumpOffset int32
-			if ip.Use32BitAddressing {
-				randomJumpOffset = int32(rand.Uint32())
-			} else {
-				randomJumpOffset = int32(int8(rand.Intn(256)))
-			}
-			ip.CurrentPtr = resolveAddress(opcodeLocation, randomJumpOffset)
+		jumpOffset := fetchImmediate()
+		if pop() != 0 {
+			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 		}
+	case SET_SP:
+		var newSPValue int32
+		if ip.Use32BitAddressing {
+			newSPValue = pop32()
+		} else {
+			newSPValue = int32(pop())
+		}
+		ip.StackPointer = resolveAddress(opcodeLocation, newSPValue)
 	}
 	ip.Steps++
 }
