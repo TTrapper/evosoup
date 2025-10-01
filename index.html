@@ -150,22 +150,56 @@
         const offscreenCanvas = document.createElement('canvas');
         const offscreenCtx = offscreenCanvas.getContext('2d');
 
-        const opcodeColors = [
-            [46, 46, 46, 255],      // 0: NOOP (Dark Gray)
-            [52, 101, 164, 255],    // 1: MOV (Blue)
-            [255, 255, 255, 255],   // 2: WRT (White)
-            [78, 154, 6, 255],      // 3: INC (Green)
-            [115, 210, 22, 255],    // 4: DEC (Lighter Green)
-            [0, 255, 255, 255],     // 5: XOR (Cyan)
-            [0, 128, 128, 255],     // 6: SHF (Teal)
-            [100, 200, 200, 255],   // 7: INV (Lighter Teal)
-            [204, 0, 0, 255],       // 9: ADD (Red)
-            [255, 102, 102, 255],   // 10: SUB (Lighter Red)
-            [102, 51, 0, 255],      // 11: AND (Brown)
-            [153, 102, 51, 255],    // 12: OR (Lighter Brown)
-            [191, 0, 255, 255],     // 13: JMP_Z (Purple)
-            [255, 128, 255, 255],   // 14: JMP_NZ (Pink)
-        ];
+        function hslToRgb(h, s, l) {
+            let r, g, b;
+            if (s === 0) {
+                r = g = b = l; // achromatic
+            } else {
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1/6) return p + (q - p) * 6 * t;
+                    if (t < 1/2) return q;
+                    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                    return p;
+                };
+                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                const p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1/3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1/3);
+            }
+            return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255), 255];
+        }
+
+        function generateRainbowColors(count) {
+            const colors = [];
+            // Special case for NOOP (index 0) - keep it dark gray
+            colors.push([46, 46, 46, 255]);
+
+            // Generate colors for other opcodes
+            // Using high saturation and medium lightness for vibrant colors.
+            const saturation = 0.9;
+            const lightness = 0.6;
+            // We start from 1 because 0 is NOOP
+            const effectiveCount = count > 1 ? count - 1 : 1;
+
+            if (effectiveCount === 1) {
+                // Only one color besides NOOP, make it blue.
+                colors.push(hslToRgb(2/3, saturation, lightness));
+            } else {
+                // We want to go from blue (hue 2/3) to red (hue 0), the long way around.
+                // This covers a hue range of 2/3 (or 240 degrees).
+                const startHue = 2/3;
+                const hueRange = 2/3;
+                for (let i = 0; i < effectiveCount; i++) {
+                    const fraction = i / (effectiveCount - 1);
+                    const hue = startHue - fraction * hueRange;
+                    colors.push(hslToRgb(hue, saturation, lightness));
+                }
+            }
+            return colors;
+        }
 
         let opcodeNames = []; // Will be populated from websocket
         let opcodeData = [];
@@ -323,6 +357,8 @@
                 if (data.type === 'instruction_set') {
                     opcodeNames = data.instructions;
                     soupTotalSize = data.soupSize;
+                    const numOpcodes = opcodeNames.length;
+                    const opcodeColors = generateRainbowColors(numOpcodes);
                     // Combine names and colors
                     opcodeData = opcodeNames.map((name, index) => {
                         return {
