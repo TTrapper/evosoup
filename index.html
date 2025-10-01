@@ -117,7 +117,7 @@
             <button id="nextPage">&gt;</button>
         </div>
         <div id="addressing-modes">
-            <label><input type="checkbox" id="32BitAddressing" checked> 32-bit Addressing</label>
+            <label><input type="checkbox" id="32BitAddressing"> 32-bit Addressing</label>
             <label><input type="checkbox" id="relativeAddressing" checked> Relative Addressing</label>
         </div>
         <div id="view-mode-controls">
@@ -732,7 +732,7 @@
         socket.onopen = function(event) {
             console.log("WebSocket connection established.");
             // Set initial cosmic ray rate on the server and UI
-            const initialSliderValue = 0; // Default value on a 0-1000 scale
+            const initialSliderValue = 300; // Default value on a 0-1000 scale
             cosmicRayRateSlider.value = initialSliderValue;
             cosmicRayRateSlider.dispatchEvent(new Event('input'));
         };

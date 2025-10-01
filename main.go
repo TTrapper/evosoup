@@ -11,7 +11,7 @@ import (
 // --- Simulation Constants ---
 const (
 	SoupSize              = 1024 * 1024
-	InitialNumIPs         = 8
+	InitialNumIPs         = 131072
 	TargetFPS             = 30  // Target a smooth FPS
 
 	// StatsAndVisSize represents the portion of the soup used for statistics and

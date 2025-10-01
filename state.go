@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,7 +54,7 @@ func NewAppState() *AppState {
 		soup:                  make([]int8, SoupSize),
 		viewStartIndex:        0,
 		viewEndIndex:          StatsAndVisSize,
-		Use32BitAddressing:    true,
+		Use32BitAddressing:    false,
 		UseRelativeAddressing: true,
 		trackingEnabled:       false,
 		ipStateChan:           make(chan vm.SavableIP, 100), // Buffered channel for IP state updates
@@ -156,6 +157,7 @@ func (s *AppState) runIP(p *vm.IP) {
 			return // Exit goroutine when stop signal is received
 		default:
 			p.Step()
+			runtime.Gosched()
 		}
 	}
 }
