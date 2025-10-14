@@ -50,7 +50,7 @@ type AppState struct {
 
 // NewAppState initializes a new simulation state.
 func NewAppState() *AppState {
-	return &AppState{
+	s := &AppState{
 		soup:                  make([]int8, SoupSize),
 		viewStartIndex:        0,
 		viewEndIndex:          StatsAndVisSize,
@@ -61,6 +61,9 @@ func NewAppState() *AppState {
 		ipStopChan:            make(chan struct{}),
 		visRequestChan:        make(chan struct{}, 1),
 	}
+	// Set a default cosmic ray rate.
+	atomic.StoreUint64(&s.cosmicRayRate, math.Float64bits(0.001))
+	return s
 }
 
 // loadSnapshot loads a simulation state from a .gob file.

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"evolution/vm"
 	"log"
+	"math"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -24,6 +26,12 @@ type InstructionSetMessage struct {
 	Type         string   `json:"type"`
 	Instructions []string `json:"instructions"`
 	SoupSize     int      `json:"soupSize"`
+}
+
+// SimParamsMessage contains simulation parameters.
+type SimParamsMessage struct {
+	Type          string  `json:"type"`
+	CosmicRayRate float64 `json:"cosmicRayRate"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -224,10 +232,37 @@ func handleWebSocket(hub *Hub, appState *AppState, w http.ResponseWriter, r *htt
 		log.Printf("Error sending instruction set: %v", err)
 	}
 
+	// Send initial simulation parameters.
+	if err := client.sendSimParams(); err != nil {
+		log.Printf("Error sending sim params: %v", err)
+	}
+
 	// Allow collection of memory referenced by the caller by doing all work in
 	// new goroutines.
 	go client.writePump()
 	go client.readPump()
+}
+
+func (c *Client) sendSimParams() error {
+	currentRateBits := atomic.LoadUint64(&c.appState.cosmicRayRate)
+	p := math.Float64frombits(currentRateBits)
+
+	msg := SimParamsMessage{
+		Type:          "sim_params",
+		CosmicRayRate: p,
+	}
+
+	encodedMsg, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	select {
+	case c.send <- encodedMsg:
+	default:
+		log.Println("Client send channel is full, dropping sim params message.")
+	}
+	return nil
 }
 
 func (c *Client) sendInstructionSet() error {

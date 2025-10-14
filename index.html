@@ -370,6 +370,19 @@
                     if (lastColorIndices) {
                         renderSoup();
                     }
+                } else if (data.type === 'sim_params') {
+                    const probability = data.cosmicRayRate;
+
+                    // This is the reverse of the calculation in the 'input' event listener
+                    // p = (v/1000)^2  =>  v = 1000 * sqrt(p)
+                    const maxSliderValue = 1000;
+                    let sliderValue = 0;
+                    if (probability > 0) {
+                        sliderValue = maxSliderValue * Math.sqrt(probability);
+                    }
+
+                    cosmicRayRateSlider.value = sliderValue;
+                    cosmicRayRateValueSpan.textContent = formatProbability(probability);
                 } else if (data.Generation !== undefined) {
                     // It's GenerationStats
                     genSpan.textContent = data.Generation;
@@ -564,15 +577,13 @@
         cosmicRayRateSlider.addEventListener('input', (e) => {
             const sliderValue = parseInt(e.target.value);
             let probability = 0;
+
+            // Use a quadratic scale for a smoother transition at the low end.
+            // probability = (sliderValue / 1000)^2
+            // This makes the slider more sensitive at lower values.
+            const maxSliderValue = 1000;
             if (sliderValue > 0) {
-                const minp = 0.0001;
-                const maxp = 1.0;
-                // The slider scale is logarithmic
-                const minv = Math.log(minp);
-                const maxv = Math.log(maxp);
-                // We use a range of 1-1000 for the slider
-                const scale = (maxv - minv) / (1000 - 1);
-                probability = Math.exp(minv + scale * (sliderValue - 1));
+                probability = Math.pow(sliderValue / maxSliderValue, 2);
             }
 
             cosmicRayRateValueSpan.textContent = formatProbability(probability);
@@ -731,10 +742,6 @@
 
         socket.onopen = function(event) {
             console.log("WebSocket connection established.");
-            // Set initial cosmic ray rate on the server and UI
-            const initialSliderValue = 300; // Default value on a 0-1000 scale
-            cosmicRayRateSlider.value = initialSliderValue;
-            cosmicRayRateSlider.dispatchEvent(new Event('input'));
         };
 
         socket.onerror = function(error) {
