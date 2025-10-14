@@ -7,26 +7,28 @@ import (
 // --- Instruction Set Opcodes ---
 const (
 	NOOP int8 = iota // 0
-	PUSH_I           // 1
-	POP_A            // 2
-	PUSH_A           // 3
-	INC              // 4
-	DEC              // 5
-	XOR              // 6
-	SHF              // 7
-	INV              // 8
-	ADD              // 9
-	SUB              // 10
-	AND              // 11
-	OR               // 12
-	JMP_Z            // 13
-	JMP_NZ           // 14
-	SET_SP           // 15
+	POP_I            // 1
+	PUSH_I           // 2
+	POP_A            // 3
+	PUSH_A           // 4
+	INC              // 5
+	DEC              // 6
+	XOR              // 7
+	SHF              // 8
+	INV              // 9
+	ADD              // 10
+	SUB              // 11
+	AND              // 12
+	OR               // 13
+	JMP_Z            // 14
+	JMP_NZ           // 15
+	SET_SP           // 16
 	NumOpcodes
 )
 
 var OpcodeNames = [...]string{
 	"NOOP",
+	"POP_I",
 	"PUSH_I",
 	"POP_A",
 	"PUSH_A",
@@ -114,16 +116,6 @@ func (ip *IP) Step() {
 		return val
 	}
 
-	// Pops 4 bytes from the stack and converts them to a 32-bit integer.
-	pop32 := func() int32 {
-		b4 := byte(pop())
-		b3 := byte(pop())
-		b2 := byte(pop())
-		b1 := byte(pop())
-		byteSlice := []byte{b1, b2, b3, b4}
-		return int32(binary.BigEndian.Uint32(byteSlice))
-	}
-
 	// Fetches 1 byte from the instruction stream and advances the pointer.
 	fetch8 := func() int8 {
 		val := ip.Soup[wrapAddr(ip.CurrentPtr)]
@@ -168,6 +160,8 @@ func (ip *IP) Step() {
 	switch opcode {
 	case NOOP:
 		// Does nothing.
+	case POP_I:
+	  ip.Soup[wrapAddr(opcodeLocation + 1)] = pop()
 	case PUSH_I:
 		val := fetch8()
 		push(val)
@@ -231,13 +225,7 @@ func (ip *IP) Step() {
 			ip.CurrentPtr = resolveAddress(opcodeLocation, jumpOffset)
 		}
 	case SET_SP:
-		var newSPValue int32
-		if ip.Use32BitAddressing {
-			newSPValue = pop32()
-		} else {
-			newSPValue = int32(pop())
-		}
-		ip.StackPointer = resolveAddress(opcodeLocation, newSPValue)
+		ip.StackPointer = resolveAddress(opcodeLocation, fetchImmediate())
 	}
 	ip.Steps++
 }
