@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -161,7 +160,6 @@ func (s *AppState) runIP(p *vm.IP) {
 			return // Exit goroutine when stop signal is received
 		default:
 			p.Step()
-			runtime.Gosched()
 		}
 	}
 }

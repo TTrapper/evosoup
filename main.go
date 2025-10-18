@@ -13,7 +13,7 @@ const (
 	SoupDimX              = 1024
 	SoupDimY              = 1024
 	SoupSize              = SoupDimX * SoupDimY
-	InitialNumIPs         = 131072
+	InitialNumIPs         = 8
 	TargetFPS             = 30  // Target a smooth FPS
 
 	// StatsAndVisSize represents the portion of the soup used for statistics and
