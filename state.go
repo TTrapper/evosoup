@@ -94,7 +94,7 @@ func (s *AppState) loadSnapshot(filename string) error {
 	atomic.StoreInt32(&s.ipCount, 0)
 
 	for _, savableIP := range state.IPs {
-		ip := vm.NewIP(savableIP.ID, s.soup, savableIP.CurrentPtr, s.Use32BitAddressing, s.UseRelativeAddressing)
+		ip := vm.NewIP(savableIP.ID, s.soup, savableIP.X, savableIP.Y, SoupDimX, s.Use32BitAddressing, s.UseRelativeAddressing)
 		s.population.Store(ip.ID, ip)
 		atomic.AddInt32(&s.ipCount, 1)
 	}
@@ -142,9 +142,10 @@ func (s *AppState) initializeSimulation() {
 
 	atomic.StoreInt32(&s.ipCount, 0)
 	for i := 0; i < InitialNumIPs; i++ {
-		startPtr := rand.Int31n(SoupSize)
+		startX := rand.Int31n(SoupDimX)
+		startY := rand.Int31n(SoupDimY)
 		newID := atomic.AddInt32(&s.nextIPID, 1)
-		ip := vm.NewIP(int(newID), s.soup, startPtr, s.Use32BitAddressing, s.UseRelativeAddressing)
+		ip := vm.NewIP(int(newID), s.soup, startX, startY, SoupDimX, s.Use32BitAddressing, s.UseRelativeAddressing)
 		s.population.Store(ip.ID, ip)
 		atomic.AddInt32(&s.ipCount, 1)
 	}
@@ -325,12 +326,13 @@ func (s *AppState) SetTrackingEnabled(enabled bool) {
 	}
 }
 
-// SetIPPtr sets the CurrentPtr of a specific IP.
+// SetIPPtr sets the X, Y of a specific IP from a 1D pointer.
 func (s *AppState) SetIPPtr(id int, ptr int32) {
 	if val, ok := s.population.Load(id); ok {
 		ip := val.(*vm.IP)
-		ip.CurrentPtr = ptr
-		log.Printf("Set IP %d CurrentPtr to %d", id, ptr)
+		ip.X = ptr % SoupDimX
+		ip.Y = ptr / SoupDimX
+		log.Printf("Set IP %d position to (%d, %d)", id, ip.X, ip.Y)
 	} else {
 		log.Printf("IP with ID %d not found to set pointer.", id)
 	}
