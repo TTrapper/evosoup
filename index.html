@@ -121,10 +121,9 @@
             <label><input type="checkbox" id="relativeAddressing" checked> Relative Addressing</label>
         </div>
         <div id="view-mode-controls">
-            <label><input type="radio" name="viewMode" value="opcode" checked> Opcodes</label>
+            <label><input type="radio" name="viewMode" value="colormap" checked> Colormap</label>
             <label><input type="radio" name="viewMode" value="heatmap"> Heatmap</label>
         </div>
-        <div id="opcode-legend"></div>
     </div>
 
     <div id="right-panel" style="display: none;">
@@ -172,38 +171,6 @@
             return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255), 255];
         }
 
-        function generateRainbowColors(count) {
-            const colors = [];
-            // Special case for NOOP (index 0) - keep it dark gray
-            colors.push([46, 46, 46, 255]);
-
-            // Generate colors for other opcodes
-            // Using high saturation and medium lightness for vibrant colors.
-            const saturation = 0.9;
-            const lightness = 0.6;
-            // We start from 1 because 0 is NOOP
-            const effectiveCount = count > 1 ? count - 1 : 1;
-
-            if (effectiveCount === 1) {
-                // Only one color besides NOOP, make it blue.
-                colors.push(hslToRgb(2/3, saturation, lightness));
-            } else {
-                // We want to go from blue (hue 2/3) to red (hue 0), the long way around.
-                // This covers a hue range of 2/3 (or 240 degrees).
-                const startHue = 2/3;
-                const hueRange = 2/3;
-                for (let i = 0; i < effectiveCount; i++) {
-                    const fraction = i / (effectiveCount - 1);
-                    const hue = startHue - fraction * hueRange;
-                    colors.push(hslToRgb(hue, saturation, lightness));
-                }
-            }
-            return colors;
-        }
-
-        let opcodeNames = []; // Will be populated from websocket
-        let opcodeData = [];
-
         function getHeatmapColor(value) {
             let r = 0, g = 0, b = 0;
             const alpha = 255;
@@ -224,6 +191,14 @@
             return [r, g, b, alpha];
         }
 
+        function getColormapColor(value) {
+            // Map 0-255 to a hue value from Blue (2/3) to Red (0)
+            const hue = (2/3) - (value / 255) * (2/3);
+            const saturation = 0.9;
+            const lightness = 0.5;
+            return hslToRgb(hue, saturation, lightness);
+        }
+
         function renderSoup() {
             if (!lastColorIndices) return;
 
@@ -239,18 +214,8 @@
                 const pixelIndex = i * 4;
                 let color;
 
-                if (viewMode === 'opcode') {
-                    if (!opcodeData || opcodeData.length === 0) {
-                        color = [128, 128, 128, 255]; // Default gray if no data
-                    } else {
-                        const NumOpcodes = opcodeData.length;
-                        if (byteValue < NumOpcodes) {
-                            color = opcodeData[byteValue].color;
-                        } else {
-                            // Not a valid instruction, color as NOOP (index 0)
-                            color = opcodeData[0].color;
-                        }
-                    }
+                if (viewMode === 'colormap') {
+                    color = getColormapColor(byteValue);
                 } else { // heatmap
                     color = getHeatmapColor(int8Value);
                 }
@@ -270,26 +235,12 @@
         const entropySpan = document.getElementById('entropy');
         const cosmicRayRateSlider = document.getElementById('cosmicRayRate');
         const cosmicRayRateValueSpan = document.getElementById('cosmicRayRateValue');
-        const opcodeLegendDiv = document.getElementById('opcode-legend');
 
         function formatProbability(p) {
             p = p * 100
             if (p === 0) return "0.00";
             if (p < 0.001) return p.toExponential(2);
             return p.toFixed(4);
-        }
-
-        function generateOpcodeLegend() {
-            opcodeLegendDiv.innerHTML = ''; // Clear existing legend
-            if (!opcodeData || opcodeData.length === 0) return;
-            opcodeData.forEach(opcode => {
-                const color = opcode.color;
-                const name = opcode.name;
-                const colorBox = `<span style="display:inline-block; width:12px; height:12px; background-color:rgba(${color.join(',')}); border:1px solid #777; vertical-align:middle; margin-right:5px;"></span>`;
-                const legendItem = document.createElement('div');
-                legendItem.innerHTML = `${colorBox}${name}`;
-                opcodeLegendDiv.appendChild(legendItem);
-            });
         }
 
         // --- View State ---
@@ -303,10 +254,10 @@
         let soupHeight = 0;
         let isDragging = false; // New flag to detect dragging
         let highlightedIpPtr = -1; // Tracked IP pointer for highlighting
-        let viewMode = 'opcode';
+        let viewMode = 'colormap';
         let lastColorIndices = null;
         let isPaused = false;
-        let soupTotalSize = 0;
+        let soupTotalSize = 1024*1024; // Default, will be updated if needed
         let soupPageSize = 0;
         let currentViewStartIndex = 0;
 
@@ -354,24 +305,9 @@
         socket.onmessage = function(event) {
             if (typeof event.data === 'string') {
                 const data = JSON.parse(event.data);
-                if (data.type === 'instruction_set') {
-                    opcodeNames = data.instructions;
-                    soupTotalSize = data.soupSize;
-                    const numOpcodes = opcodeNames.length;
-                    const opcodeColors = generateRainbowColors(numOpcodes);
-                    // Combine names and colors
-                    opcodeData = opcodeNames.map((name, index) => {
-                        return {
-                            name: name,
-                            color: opcodeColors[index] || [128, 128, 128, 255] // Default gray
-                        };
-                    });
-                    generateOpcodeLegend();
-                    if (lastColorIndices) {
-                        renderSoup();
-                    }
-                } else if (data.type === 'sim_params') {
+                if (data.type === 'sim_params') {
                     const probability = data.cosmicRayRate;
+                    soupTotalSize = data.soupSize;
 
                     // This is the reverse of the calculation in the 'input' event listener
                     // p = (v/1000)^2  =>  v = 1000 * sqrt(p)
@@ -391,9 +327,10 @@
                 } else if (data.ID !== undefined) {
                     // It's an IP state update (SavableIP)
                     trackedIpIdSpan.textContent = data.ID;
-                    trackedIpCurrentPtrSpan.textContent = "0x" + data.CurrentPtr.toString(16);
+                    const currentPtr = data.Y * soupWidth + data.X;
+                    trackedIpCurrentPtrSpan.textContent = `(${data.X}, ${data.Y})`;
 
-                    highlightedIpPtr = data.CurrentPtr; // Update highlighted IP pointer
+                    highlightedIpPtr = currentPtr; // Update highlighted IP pointer
 
                     // If follow IP is enabled, center the view on the IP
                     if (followIpCheckbox.checked && highlightedIpPtr !== -1 && soupWidth > 0) {
@@ -423,38 +360,14 @@
                     // Always request a redraw to show the highlight, even if not following
                     requestAnimationFrame(draw);
 
-                    let instructionName = "UNKNOWN";
-                    let color = [128, 128, 128, 255]; // Default gray
+                    const instructionValue = data.CurrentInstruction;
+                    const instructionHex = "0x" + instructionValue.toString(16).padStart(2, '0');
+                    trackedIpInstructionSpan.textContent = instructionHex;
 
-                    if (opcodeData && opcodeData.length > 0) {
-                        const instructionValue = data.CurrentInstruction;
-                        const NumOpcodes = opcodeData.length;
-                        let opcode;
-                        if (instructionValue >= 0 && instructionValue < NumOpcodes) {
-                            opcode = opcodeData[instructionValue];
-                        } else {
-                            opcode = opcodeData[0];
-                        }
-                        instructionName = opcode.name;
-                        color = opcode.color;
-                    }
-
-
-                    trackedIpInstructionSpan.innerHTML = ``; // Clear previous content
-                    const colorBox = document.createElement('span');
-                    colorBox.style.display = 'inline-block';
-                    colorBox.style.width = '12px';
-                    colorBox.style.height = '12px';
-                    colorBox.style.backgroundColor = `rgba(${color.join(',')})`;
-                    colorBox.style.border = '1px solid #777';
-                    colorBox.style.verticalAlign = 'middle';
-                    colorBox.style.marginRight = '5px';
-                    trackedIpInstructionSpan.appendChild(colorBox);
-                    trackedIpInstructionSpan.append(instructionName);
 
                     // Add to instruction history
                     const historyItem = document.createElement('div');
-                    historyItem.textContent = `ID: ${data.ID}, Ptr: 0x${data.CurrentPtr.toString(16)}, Instr: ${instructionName}`;
+                    historyItem.textContent = `ID: ${data.ID}, Pos: (${data.X},${data.Y}), Instr: ${instructionHex}`;
                     instructionHistoryDiv.prepend(historyItem); // Add to the top
                     if (instructionHistoryDiv.children.length > 50) { // Limit history to 50 items
                         instructionHistoryDiv.removeChild(instructionHistoryDiv.lastChild);
@@ -721,11 +634,6 @@
         viewModeRadios.forEach(radio => {
             radio.addEventListener('change', (event) => {
                 viewMode = event.target.value;
-                if (viewMode === 'opcode') {
-                    opcodeLegendDiv.style.display = 'block';
-                } else {
-                    opcodeLegendDiv.style.display = 'none';
-                }
                 renderSoup(); // Redraw with the new mode
             });
         });
@@ -749,6 +657,4 @@
         };
     </script>
 </body>
-</html>
-body>
 </html>
