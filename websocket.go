@@ -23,7 +23,7 @@ const (
 
 type OpcodeInfo struct {
 	Name  string `json:"name"`
-	Value int8   `json:"value"`
+	Value uint8   `json:"value"`
 }
 
 // InstructionInfoMessage contains all opcode information.
@@ -278,7 +278,7 @@ func (c *Client) sendInstructionSet() error {
 	msg := InstructionInfoMessage{
 		Type:     "instruction_info",
 		Opcodes:  opcodes,
-		ModeBits: 3, // Currently 3 mode bits
+		ModeBits: 4, // Now 4 mode bits (includes invert bit)
 	}
 
 	encodedMsg, err := json.Marshal(msg)
