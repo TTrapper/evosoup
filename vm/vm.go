@@ -8,8 +8,7 @@ import (
 // --- Instruction Set Opcodes ---
 // 5 bits for opcode, 3 bits for addressing modes.
 const (
-	OP_NOOP int8 = iota << 3 // 0
-	OP_MOV                   // 8
+	OP_MOV int8 = (iota + 1) << 3 // 8
 	OP_ADD                   // 16
 	OP_SUB                   // 24
 	OP_INC                   // 32
@@ -26,6 +25,31 @@ const (
 
 var OpcodeNames = [...]string{
 	"NOOP", "MOV", "ADD", "SUB", "INC", "DEC", "XOR", "AND", "OR", "SHF", "INV", "JMP", "JE", "JNE",
+}
+
+// OpcodeInfo contains the name and value for a given opcode.
+type OpcodeInfo struct {
+	Name  string `json:"name"`
+	Value int8   `json:"value"`
+}
+
+// GetOpcodes returns a list of all defined opcodes and their values.
+func GetOpcodes() []OpcodeInfo {
+	return []OpcodeInfo{
+		{Name: "MOV", Value: OP_MOV},
+		{Name: "ADD", Value: OP_ADD},
+		{Name: "SUB", Value: OP_SUB},
+		{Name: "INC", Value: OP_INC},
+		{Name: "DEC", Value: OP_DEC},
+		{Name: "XOR", Value: OP_XOR},
+		{Name: "AND", Value: OP_AND},
+		{Name: "OR", Value: OP_OR},
+		{Name: "SHF", Value: OP_SHF},
+		{Name: "INV", Value: OP_INV},
+		{Name: "JMP", Value: OP_JMP},
+		{Name: "JE", Value: OP_JE},
+		{Name: "JNE", Value: OP_JNE},
+	}
 }
 
 var directions = [8][2]int32{
@@ -190,8 +214,6 @@ func (ip *IP) Step() {
 
 	// --- Instruction Execution ---
 	switch opcode {
-	case OP_NOOP:
-		// Does nothing.
 	case OP_MOV:
 		val1 := getOperand(modeSrc1)
 		destAddr := getDestAddress(modeDst)

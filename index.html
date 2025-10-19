@@ -124,13 +124,14 @@
             <label><input type="radio" name="viewMode" value="colormap" checked> Colormap</label>
             <label><input type="radio" name="viewMode" value="heatmap"> Heatmap</label>
         </div>
+        <div id="opcode-legend"></div>
     </div>
 
     <div id="right-panel" style="display: none;">
         <h2>Tracked IP State</h2>
         <div id="trackedIpState">
             <p>ID: <span id="trackedIpId">-</span></p>
-            <p>Current Ptr: <span id="trackedIpCurrentPtr">-</span></p>
+            <p>Position: <span id="trackedIpPosition">-</span></p>
             <p>Instruction: <span id="trackedIpInstruction">-</span></p>
             <button id="stepButton">Step</button>
             <label><input type="checkbox" id="followIpCheckbox" checked> Follow IP</label>
@@ -171,36 +172,53 @@
             return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255), 255];
         }
 
+        let opcodeColormap = null;
+        let instructionInfo = {};
+
+        function generateOpcodeColormap() {
+            const opcodes = instructionInfo.opcodes;
+            const modeBits = instructionInfo.mode_bits;
+            if (!opcodes || modeBits === undefined) return;
+
+            const colormap = new Array(256);
+            const bgColor = [46, 46, 46, 255];
+            colormap.fill(bgColor);
+
+            const variantsPerOp = 1 << modeBits;
+            const numOpcodes = opcodes.length;
+
+            const saturation = 0.9;
+            const lightness = 0.6;
+
+            opcodes.forEach((opcode, index) => {
+                // Distribute hues from blue to red
+                const hue = (2/3) - (index / (numOpcodes -1)) * (2/3);
+                const baseColor = hslToRgb(hue, saturation, lightness);
+                opcode.color = baseColor; // Store color for the legend
+
+                for (let i = 0; i < variantsPerOp; i++) {
+                    const byteValue = parseInt(opcode.value) + i;
+                    if (byteValue < 256) {
+                        colormap[byteValue] = baseColor;
+                    }
+                }
+            });
+            opcodeColormap = colormap;
+        }
+
         function getHeatmapColor(value) {
             let r = 0, g = 0, b = 0;
             const alpha = 255;
-            // Handle positive values (0 to 127): transition from black to red
             if (value > 0) {
-                const intensity = value / 127.0;
-                r = 255 * intensity;
-            }
-            // Handle negative values (-128 to -1): transition from black to blue
-            else if (value < 0) {
-                const intensity = Math.abs(value) / 128.0;
-                b = 255 * intensity;
-            }
-            // Handle the midpoint (zero)
-            else {
-                b = 0;
+                r = 255 * (value / 127.0);
+            } else if (value < 0) {
+                b = 255 * (Math.abs(value) / 128.0);
             }
             return [r, g, b, alpha];
         }
 
-        function getColormapColor(value) {
-            // Map 0-255 to a hue value from Blue (2/3) to Red (0)
-            const hue = (2/3) - (value / 255) * (2/3);
-            const saturation = 0.9;
-            const lightness = 0.5;
-            return hslToRgb(hue, saturation, lightness);
-        }
-
         function renderSoup() {
-            if (!lastColorIndices) return;
+            if (!lastColorIndices || !opcodeColormap) return;
 
             const soupSize = lastColorIndices.length;
             if (soupWidth * soupHeight !== soupSize) {
@@ -215,7 +233,7 @@
                 let color;
 
                 if (viewMode === 'colormap') {
-                    color = getColormapColor(byteValue);
+                    color = opcodeColormap[byteValue];
                 } else { // heatmap
                     color = getHeatmapColor(int8Value);
                 }
@@ -235,12 +253,26 @@
         const entropySpan = document.getElementById('entropy');
         const cosmicRayRateSlider = document.getElementById('cosmicRayRate');
         const cosmicRayRateValueSpan = document.getElementById('cosmicRayRateValue');
+        const opcodeLegendDiv = document.getElementById('opcode-legend');
 
         function formatProbability(p) {
             p = p * 100
             if (p === 0) return "0.00";
             if (p < 0.001) return p.toExponential(2);
             return p.toFixed(4);
+        }
+
+        function generateOpcodeLegend() {
+            opcodeLegendDiv.innerHTML = ''; // Clear existing legend
+            if (!instructionInfo.opcodes) return;
+            instructionInfo.opcodes.forEach(opcode => {
+                const color = opcode.color;
+                const name = opcode.name;
+                const colorBox = `<span style="display:inline-block; width:12px; height:12px; background-color:rgba(${color.join(',')}); border:1px solid #777; vertical-align:middle; margin-right:5px;"></span>`;
+                const legendItem = document.createElement('div');
+                legendItem.innerHTML = `${colorBox}${name}`;
+                opcodeLegendDiv.appendChild(legendItem);
+            });
         }
 
         // --- View State ---
@@ -252,12 +284,12 @@
         let lastMouseY = 0;
         let soupWidth = 0;
         let soupHeight = 0;
-        let isDragging = false; // New flag to detect dragging
-        let highlightedIpPtr = -1; // Tracked IP pointer for highlighting
+        let isDragging = false;
+        let highlightedIpPtr = -1;
         let viewMode = 'colormap';
         let lastColorIndices = null;
         let isPaused = false;
-        let soupTotalSize = 1024*1024; // Default, will be updated if needed
+        let soupTotalSize = 1024*1024;
         let soupPageSize = 0;
         let currentViewStartIndex = 0;
 
@@ -271,14 +303,12 @@
         function draw() {
             if (!soupWidth) return;
 
-            // Set canvas size to fill container
             canvas.width = canvasContainer.clientWidth;
             canvas.height = canvasContainer.clientHeight;
 
-            // --- Disable image smoothing for crisp pixels ---
             ctx.imageSmoothingEnabled = false;
-            ctx.webkitImageSmoothingEnabled = false; // For Safari
-            ctx.mozImageSmoothingEnabled = false;    // For Firefox
+            ctx.webkitImageSmoothingEnabled = false;
+            ctx.mozImageSmoothingEnabled = false;
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.save();
@@ -286,7 +316,6 @@
             ctx.scale(zoom, zoom);
             ctx.drawImage(offscreenCanvas, 0, 0);
 
-            // Highlight tracked IP
             if (highlightedIpPtr !== -1 && soupWidth > 0) {
                 const relativePtr = highlightedIpPtr - currentViewStartIndex;
                 if (relativePtr >= 0 && relativePtr < (soupWidth * soupHeight)) {
@@ -294,8 +323,8 @@
                     const pixelY = Math.floor(relativePtr / soupWidth);
 
                     ctx.strokeStyle = 'yellow';
-                    ctx.lineWidth = 2 / zoom; // Adjust line width to scale with zoom
-                    ctx.strokeRect(pixelX, pixelY, 1, 1); // Draw 1x1 rectangle, which will be scaled by context.zoom
+                    ctx.lineWidth = 2 / zoom;
+                    ctx.strokeRect(pixelX, pixelY, 1, 1);
                 }
             }
 
@@ -305,12 +334,17 @@
         socket.onmessage = function(event) {
             if (typeof event.data === 'string') {
                 const data = JSON.parse(event.data);
-                if (data.type === 'sim_params') {
+                if (data.type === 'instruction_info') {
+                    instructionInfo = data;
+                    generateOpcodeColormap();
+                    generateOpcodeLegend();
+                    if (lastColorIndices) {
+                        renderSoup();
+                    }
+                } else if (data.type === 'sim_params') {
                     const probability = data.cosmicRayRate;
                     soupTotalSize = data.soupSize;
 
-                    // This is the reverse of the calculation in the 'input' event listener
-                    // p = (v/1000)^2  =>  v = 1000 * sqrt(p)
                     const maxSliderValue = 1000;
                     let sliderValue = 0;
                     if (probability > 0) {
@@ -320,56 +354,45 @@
                     cosmicRayRateSlider.value = sliderValue;
                     cosmicRayRateValueSpan.textContent = formatProbability(probability);
                 } else if (data.Generation !== undefined) {
-                    // It's GenerationStats
                     genSpan.textContent = data.Generation;
                     stepsSpan.textContent = (data.StepsPerSecond).toLocaleString();
                     entropySpan.textContent = data.Entropy.toFixed(2);
                 } else if (data.ID !== undefined) {
-                    // It's an IP state update (SavableIP)
                     trackedIpIdSpan.textContent = data.ID;
                     const currentPtr = data.Y * soupWidth + data.X;
-                    trackedIpCurrentPtrSpan.textContent = `(${data.X}, ${data.Y})`;
+                    trackedIpPositionSpan.textContent = `(${data.X}, ${data.Y})`;
 
-                    highlightedIpPtr = currentPtr; // Update highlighted IP pointer
+                    highlightedIpPtr = currentPtr;
 
-                    // If follow IP is enabled, center the view on the IP
                     if (followIpCheckbox.checked && highlightedIpPtr !== -1 && soupWidth > 0) {
                         const localSoupPageSize = soupWidth * soupHeight;
                         const ipPageStartIndex = Math.floor(highlightedIpPtr / localSoupPageSize) * localSoupPageSize;
 
-                        // Check if the IP has moved to a different page
                         if (ipPageStartIndex !== currentViewStartIndex) {
-                            // Switch to the correct page
                             currentViewStartIndex = ipPageStartIndex;
                             sendViewStartIndex(currentViewStartIndex);
                             updatePageInfo();
                         }
 
-                        // Calculate position relative to the current page
                         const relativePtr = highlightedIpPtr - currentViewStartIndex;
                         const pixelX = relativePtr % soupWidth;
                         const pixelY = Math.floor(relativePtr / soupWidth);
+                        const targetZoom = 16;
 
-                        const targetZoom = 16; // A good zoom level to see the IP
-
-                        // Calculate new offsets to center the IP
                         offsetX = (canvas.width / 2) - (pixelX * targetZoom);
                         offsetY = (canvas.height / 2) - (pixelY * targetZoom);
                         zoom = targetZoom;
                     }
-                    // Always request a redraw to show the highlight, even if not following
                     requestAnimationFrame(draw);
 
                     const instructionValue = data.CurrentInstruction;
                     const instructionHex = "0x" + instructionValue.toString(16).padStart(2, '0');
                     trackedIpInstructionSpan.textContent = instructionHex;
 
-
-                    // Add to instruction history
                     const historyItem = document.createElement('div');
                     historyItem.textContent = `ID: ${data.ID}, Pos: (${data.X},${data.Y}), Instr: ${instructionHex}`;
-                    instructionHistoryDiv.prepend(historyItem); // Add to the top
-                    if (instructionHistoryDiv.children.length > 50) { // Limit history to 50 items
+                    instructionHistoryDiv.prepend(historyItem);
+                    if (instructionHistoryDiv.children.length > 50) {
                         instructionHistoryDiv.removeChild(instructionHistoryDiv.lastChild);
                     }
                 }
@@ -387,7 +410,6 @@
                     offscreenCanvas.height = soupHeight;
                     imageData = offscreenCtx.createImageData(soupWidth, soupHeight);
                     imageDataBuffer = imageData.data;
-                    // Center the initial view
                     offsetX = (canvasContainer.clientWidth - soupWidth * zoom) / 2;
                     offsetY = (canvasContainer.clientHeight - soupHeight * zoom) / 2;
                 }
@@ -398,10 +420,9 @@
 
         // --- Event Listeners ---
 
-        // Pan
         canvasContainer.addEventListener('mousedown', (e) => {
             isPanning = true;
-            isDragging = false; // Assume not dragging initially
+            isDragging = false;
             canvasContainer.style.cursor = 'grabbing';
             lastMouseX = e.clientX;
             lastMouseY = e.clientY;
@@ -421,7 +442,7 @@
             if (!isPanning) return;
             const dx = e.clientX - lastMouseX;
             const dy = e.clientY - lastMouseY;
-            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) { // Consider it a drag if moved more than 5 pixels
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
                 isDragging = true;
             }
             offsetX += dx;
@@ -431,27 +452,23 @@
             requestAnimationFrame(draw);
         });
 
-        // Click to set IP pointer
         canvas.addEventListener('click', (e) => {
-            if (isDragging) { // Don't set IP if it was a drag
-                isDragging = false; // Reset for next click
+            if (isDragging) {
+                isDragging = false;
                 return;
             }
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Convert canvas coordinates to soup coordinates
             const soupX = Math.floor((x - offsetX) / zoom);
             const soupY = Math.floor((y - offsetY) / zoom);
 
-            // Calculate the absolute soup address
             const soupAddress = currentViewStartIndex + (soupY * soupWidth) + soupX;
 
-            // Send the command to the server for IP ID 1
             const message = {
                 type: "set_ip_ptr",
-                id: 1, // Hardcoded for the first IP
+                id: 1,
                 ptr: soupAddress
             };
             if (socket.readyState === WebSocket.OPEN) {
@@ -459,41 +476,32 @@
             }
         });
 
-        // Zoom
         canvasContainer.addEventListener('wheel', (e) => {
             e.preventDefault();
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
 
-            // Position of the mouse relative to the zoomed image
             const mouseXInImage = (mouseX - offsetX) / zoom;
             const mouseYInImage = (mouseY - offsetY) / zoom;
 
             const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
             const newZoom = zoom * zoomFactor;
 
-            // Clamp zoom level
             const maxZoom = 32;
-            const minZoom = canvasContainer.clientHeight / 1024; // Ensure it doesn't get smaller than the view
+            const minZoom = canvasContainer.clientHeight / 1024;
             zoom = Math.max(minZoom, Math.min(newZoom, maxZoom));
 
-            // Adjust offset to keep the mouse position constant
             offsetX = mouseX - mouseXInImage * zoom;
             offsetY = mouseY - mouseYInImage * zoom;
 
             requestAnimationFrame(draw);
         });
 
-
-        // Jump Failure Probability Slider
         cosmicRayRateSlider.addEventListener('input', (e) => {
             const sliderValue = parseInt(e.target.value);
             let probability = 0;
 
-            // Use a quadratic scale for a smoother transition at the low end.
-            // probability = (sliderValue / 1000)^2
-            // This makes the slider more sensitive at lower values.
             const maxSliderValue = 1000;
             if (sliderValue > 0) {
                 probability = Math.pow(sliderValue / maxSliderValue, 2);
@@ -522,7 +530,7 @@
 
         const rightPanel = document.getElementById('right-panel');
         const trackedIpIdSpan = document.getElementById('trackedIpId');
-        const trackedIpCurrentPtrSpan = document.getElementById('trackedIpCurrentPtr');
+        const trackedIpPositionSpan = document.getElementById('trackedIpPosition');
         const trackedIpInstructionSpan = document.getElementById('trackedIpInstruction');
         const instructionHistoryDiv = document.getElementById('instructionHistory');
         const pageInfoSpan = document.getElementById('pageInfo');
@@ -634,14 +642,17 @@
         viewModeRadios.forEach(radio => {
             radio.addEventListener('change', (event) => {
                 viewMode = event.target.value;
-                renderSoup(); // Redraw with the new mode
+                if (viewMode === 'colormap') {
+                    opcodeLegendDiv.style.display = 'block';
+                } else {
+                    opcodeLegendDiv.style.display = 'none';
+                }
+                renderSoup();
             });
         });
 
-        // Resize Observer
         new ResizeObserver(draw).observe(canvasContainer);
 
-        // Keyboard shortcuts
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' && rightPanel.style.display === 'block') {
                 stepButton.click();

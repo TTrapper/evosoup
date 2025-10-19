@@ -21,12 +21,18 @@ const (
 	maxMessageSize = 512
 )
 
-// InstructionSetMessage contains all opcode information.
-type InstructionSetMessage struct {
-	Type         string   `json:"type"`
-	Instructions []string `json:"instructions"`
-	SoupSize     int      `json:"soupSize"`
+type OpcodeInfo struct {
+	Name  string `json:"name"`
+	Value int8   `json:"value"`
 }
+
+// InstructionInfoMessage contains all opcode information.
+type InstructionInfoMessage struct {
+	Type     string          `json:"type"`
+	Opcodes  []vm.OpcodeInfo `json:"opcodes"`
+	ModeBits int             `json:"mode_bits"`
+}
+
 
 // SimParamsMessage contains simulation parameters.
 type SimParamsMessage struct {
@@ -266,16 +272,13 @@ func (c *Client) sendSimParams() error {
 }
 
 func (c *Client) sendInstructionSet() error {
-	// Create a slice of strings from the OpcodeNames array
-	instructionNames := make([]string, len(vm.OpcodeNames))
-	for i := range vm.OpcodeNames {
-		instructionNames[i] = vm.OpcodeNames[i]
-	}
+	// Get the canonical list of opcodes from the vm package
+	opcodes := vm.GetOpcodes()
 
-	msg := InstructionSetMessage{
-		Type:         "instruction_set",
-		Instructions: instructionNames,
-		SoupSize:     SoupSize,
+	msg := InstructionInfoMessage{
+		Type:     "instruction_info",
+		Opcodes:  opcodes,
+		ModeBits: 3, // Currently 3 mode bits
 	}
 
 	encodedMsg, err := json.Marshal(msg)
