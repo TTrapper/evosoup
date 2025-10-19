@@ -8,23 +8,18 @@ import (
 // --- Instruction Set Opcodes ---
 // 5 bits for opcode, 3 bits for addressing modes.
 const (
-	OP_MOV uint8 = (iota + 1) << 4 // 16
-	OP_ADD                       // 32
-	OP_SUB                       // 48
-	OP_INC                       // 64
-	OP_DEC                       // 80
-	OP_XOR                       // 96
-	OP_AND                       // 112
-	OP_OR                        // 128
-	OP_SHF                       // 144
-	OP_JMP                       // 160
-	OP_JE                        // 176 // Jump if zero
-	OP_JNE                       // 192 // Jump if not zero
+	OP_ADD uint8 = (iota + 1) << 4 // 16
+	OP_SUB                         // 32
+	OP_INC                         // 48
+	OP_DEC                         // 64
+	OP_XOR                         // 80
+	OP_AND                         // 96
+	OP_OR                          // 112
+	OP_SHF                         // 128
+	OP_JMP                         // 144
+	OP_JE                          // 160
+	OP_JNE                         // 176
 )
-
-var OpcodeNames = [...]string{
-	"NOOP", "MOV", "ADD", "SUB", "INC", "DEC", "XOR", "AND", "OR", "SHF", "INV", "JMP", "JE", "JNE",
-}
 
 // OpcodeInfo contains the name and value for a given opcode.
 type OpcodeInfo struct {
@@ -35,7 +30,6 @@ type OpcodeInfo struct {
 // GetOpcodes returns a list of all defined opcodes and their values.
 func GetOpcodes() []OpcodeInfo {
 	return []OpcodeInfo{
-		{Name: "MOV", Value: OP_MOV},
 		{Name: "ADD", Value: OP_ADD},
 		{Name: "SUB", Value: OP_SUB},
 		{Name: "INC", Value: OP_INC},
@@ -213,13 +207,6 @@ func (ip *IP) Step() {
 
 	// --- Instruction Execution ---
 	switch opcode {
-	case OP_MOV:
-		result := getOperand(modeSrc1)
-		destAddr := getDestAddress(modeDst)
-		if invertBit == 1 {
-			result = ^result
-		}
-		ip.Soup[destAddr] = int8(result)
 	case OP_ADD:
 		val1 := getOperand(modeSrc1)
 		val2 := getOperand(modeSrc2)
