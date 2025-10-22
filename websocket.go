@@ -21,18 +21,12 @@ const (
 	maxMessageSize = 512
 )
 
-type OpcodeInfo struct {
-	Name  string `json:"name"`
-	Value uint8   `json:"value"`
-}
-
-// InstructionInfoMessage contains all opcode information.
+// InstructionInfoMessage contains all opcode information for the client.
 type InstructionInfoMessage struct {
-	Type     string          `json:"type"`
-	Opcodes  []vm.OpcodeInfo `json:"opcodes"`
-	ModeBits int             `json:"mode_bits"`
+	Type      string        `json:"type"`
+	Opcodes   []vm.OpcodeInfo `json:"opcodes"`
+	AluOpBits int           `json:"alu_op_bits"`
 }
-
 
 // SimParamsMessage contains simulation parameters.
 type SimParamsMessage struct {
@@ -238,6 +232,7 @@ func handleWebSocket(hub *Hub, appState *AppState, w http.ResponseWriter, r *htt
 		log.Printf("Error sending instruction set: %v", err)
 	}
 
+
 	// Send initial simulation parameters.
 	if err := client.sendSimParams(); err != nil {
 		log.Printf("Error sending sim params: %v", err)
@@ -272,13 +267,10 @@ func (c *Client) sendSimParams() error {
 }
 
 func (c *Client) sendInstructionSet() error {
-	// Get the canonical list of opcodes from the vm package
-	opcodes := vm.GetOpcodes()
-
 	msg := InstructionInfoMessage{
-		Type:     "instruction_info",
-		Opcodes:  opcodes,
-		ModeBits: 4, // Now 4 mode bits (includes invert bit)
+		Type:      "instruction_info",
+		Opcodes:   vm.GetOpcodes(),
+		AluOpBits: 2, // Currently 2 bits for the aluOp
 	}
 
 	encodedMsg, err := json.Marshal(msg)
@@ -293,7 +285,6 @@ func (c *Client) sendInstructionSet() error {
 	}
 	return nil
 }
-
 
 // serveIndex serves the main HTML file.
 func serveIndex(w http.ResponseWriter, r *http.Request) {

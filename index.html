@@ -146,7 +146,6 @@
         const canvas = document.getElementById('soupCanvas');
         const ctx = canvas.getContext('2d');
 
-        // Offscreen canvas for holding the raw soup image
         const offscreenCanvas = document.createElement('canvas');
         const offscreenCtx = offscreenCanvas.getContext('2d');
 
@@ -172,38 +171,32 @@
             return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255), 255];
         }
 
-        let opcodeColormap = null;
         let instructionInfo = {};
+        let colorLookup = new Array(256).fill([46, 46, 46, 255]);
 
-        function generateOpcodeColormap() {
+        function generateColormap() {
+            if (!instructionInfo.opcodes) return;
+
             const opcodes = instructionInfo.opcodes;
-            const modeBits = instructionInfo.mode_bits;
-            if (!opcodes || modeBits === undefined) return;
-
-            const colormap = new Array(256);
-            const bgColor = [46, 46, 46, 255];
-            colormap.fill(bgColor);
-
-            const variantsPerOp = 1 << modeBits;
+            const aluOpBits = instructionInfo.alu_op_bits;
             const numOpcodes = opcodes.length;
+            const mask = (0xFF << (8 - aluOpBits)) & 0xFF;
+            const opToColor = {};
 
-            const saturation = 0.9;
-            const lightness = 0.6;
-
-            opcodes.forEach((opcode, index) => {
-                // Distribute hues from blue to red
-                const hue = (2/3) - (index / (numOpcodes -1)) * (2/3);
-                const baseColor = hslToRgb(hue, saturation, lightness);
-                opcode.color = baseColor; // Store color for the legend
-
-                for (let i = 0; i < variantsPerOp; i++) {
-                    const byteValue = parseInt(opcode.value) + i;
-                    if (byteValue < 256) {
-                        colormap[byteValue] = baseColor;
-                    }
-                }
+            // 1. Generate a base color for each opcode type
+            opcodes.forEach((op, index) => {
+                const hue = (2/3) - (index / (numOpcodes - 1)) * (2/3);
+                op.color = hslToRgb(hue, 0.9, 0.6);
+                opToColor[op.value << (8 - aluOpBits)] = op.color;
             });
-            opcodeColormap = colormap;
+
+            // 2. Create the 256-entry lookup table
+            const newColorLookup = new Array(256);
+            for (let i = 0; i < 256; i++) {
+                const opValue = i & mask;
+                newColorLookup[i] = opToColor[opValue] || [46, 46, 46, 255];
+            }
+            colorLookup = newColorLookup;
         }
 
         function getHeatmapColor(value) {
@@ -218,7 +211,7 @@
         }
 
         function renderSoup() {
-            if (!lastColorIndices || !opcodeColormap) return;
+            if (!lastColorIndices) return;
 
             const soupSize = lastColorIndices.length;
             if (soupWidth * soupHeight !== soupSize) {
@@ -233,7 +226,7 @@
                 let color;
 
                 if (viewMode === 'colormap') {
-                    color = opcodeColormap[byteValue];
+                    color = colorLookup[byteValue];
                 } else { // heatmap
                     color = getHeatmapColor(int8Value);
                 }
@@ -262,12 +255,12 @@
             return p.toFixed(4);
         }
 
-        function generateOpcodeLegend() {
+        function generateLegend() {
             opcodeLegendDiv.innerHTML = ''; // Clear existing legend
             if (!instructionInfo.opcodes) return;
-            instructionInfo.opcodes.forEach(opcode => {
-                const color = opcode.color;
-                const name = opcode.name;
+            instructionInfo.opcodes.forEach(op => {
+                const color = op.color;
+                const name = op.name;
                 const colorBox = `<span style="display:inline-block; width:12px; height:12px; background-color:rgba(${color.join(',')}); border:1px solid #777; vertical-align:middle; margin-right:5px;"></span>`;
                 const legendItem = document.createElement('div');
                 legendItem.innerHTML = `${colorBox}${name}`;
@@ -336,8 +329,8 @@
                 const data = JSON.parse(event.data);
                 if (data.type === 'instruction_info') {
                     instructionInfo = data;
-                    generateOpcodeColormap();
-                    generateOpcodeLegend();
+                    generateColormap();
+                    generateLegend();
                     if (lastColorIndices) {
                         renderSoup();
                     }
@@ -651,6 +644,7 @@
             });
         });
 
+        // Initial setup
         new ResizeObserver(draw).observe(canvasContainer);
 
         document.addEventListener('keydown', (event) => {
