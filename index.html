@@ -181,20 +181,43 @@
             const aluOpBits = instructionInfo.alu_op_bits;
             const numOpcodes = opcodes.length;
             const mask = (0xFF << (8 - aluOpBits)) & 0xFF;
-            const opToColor = {};
+            const opToHue = {};
 
-            // 1. Generate a base color for each opcode type
+            // 1. Generate a base hue for each opcode type
             opcodes.forEach((op, index) => {
                 const hue = (2/3) - (index / (numOpcodes - 1)) * (2/3);
+                // Keep op.color for the legend, representing the base color
                 op.color = hslToRgb(hue, 0.9, 0.6);
-                opToColor[op.value << (8 - aluOpBits)] = op.color;
+                opToHue[op.value << (8 - aluOpBits)] = hue;
             });
 
-            // 2. Create the 256-entry lookup table
+            // 2. Create the 256-entry lookup table with shading
             const newColorLookup = new Array(256);
+            const numShadingBits = 8 - aluOpBits;
+            const maxShadingValue = (1 << numShadingBits) - 1;
+
             for (let i = 0; i < 256; i++) {
                 const opValue = i & mask;
-                newColorLookup[i] = opToColor[opValue] || [46, 46, 46, 255];
+                const hue = opToHue[opValue];
+
+                if (hue === undefined) {
+                    newColorLookup[i] = [46, 46, 46, 255]; // Default color for unused bytes
+                } else {
+                    const shadingVariant = i & maxShadingValue;
+                    // Vary lightness to create shades for instruction variants
+                    const minLightness = 0.4;
+                    const maxLightness = 0.8;
+                    const lightnessRange = maxLightness - minLightness;
+
+                    let lightness;
+                    if (maxShadingValue > 0) {
+                        lightness = minLightness + (shadingVariant / maxShadingValue) * lightnessRange;
+                    } else {
+                        lightness = 0.6; // Base lightness if no shading bits
+                    }
+
+                    newColorLookup[i] = hslToRgb(hue, 0.9, lightness);
+                }
             }
             colorLookup = newColorLookup;
         }
