@@ -270,7 +270,7 @@ func (c *Client) sendInstructionSet() error {
 	msg := InstructionInfoMessage{
 		Type:      "instruction_info",
 		Opcodes:   vm.GetOpcodes(),
-		AluOpBits: 2, // Currently 2 bits for the aluOp
+		AluOpBits: vm.NumAluBits,
 	}
 
 	encodedMsg, err := json.Marshal(msg)

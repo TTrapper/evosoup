@@ -1,19 +1,32 @@
 package vm
 
-import (
-	"encoding/binary"
-	"math/rand"
-)
+import "math/rand"
 
-// --- Rule-based Opcodes & Types ---
-// Layout: [aluOp(2) | src1(2) | src2(2) | dest(2)]
+// --- Micro-Architectural Instruction Format ---
+// An instruction is a single byte, decoded as a bitfield:
+// [ALU_Op(4) | S1_Ptr(1) | S2_Ptr(1) | Destination(2)]
+// MSB.............................................LSB
 
-// ALU Ops (Bits 7-6)
+const NumAluBits = 4 // For websocket.go
+
+// ALU Opcodes
 const (
-	ALU_NAND uint8 = 0
-	ALU_XOR  uint8 = 1
-	ALU_MOV  uint8 = 2
-	ALU_JMP  uint8 = 3
+	OP_NOP    uint8 = 0
+	OP_ADD    uint8 = 1
+	OP_SUB    uint8 = 2
+	OP_NAND   uint8 = 3
+	OP_OR     uint8 = 4
+	OP_AND    uint8 = 5
+	OP_XOR    uint8 = 6
+	OP_NOT_S1 uint8 = 7
+	OP_MOV_S1 uint8 = 8
+	OP_MOV_S2 uint8 = 9
+	OP_INC_S1 uint8 = 10
+	OP_DEC_S1 uint8 = 11
+	OP_JMP    uint8 = 12 // Unconditional jump
+	OP_JZ     uint8 = 13 // Jump if src1Val == 0
+	OP_JNZ    uint8 = 14 // Jump if src1Val != 0
+	OP_JNEG   uint8 = 15 // Jump if src1Val < 0
 )
 
 // OpcodeInfo contains the name and value for a given opcode.
@@ -25,28 +38,24 @@ type OpcodeInfo struct {
 // GetOpcodes returns a list of all defined opcodes and their values.
 func GetOpcodes() []OpcodeInfo {
 	return []OpcodeInfo{
-		{Name: "NAND", Value: ALU_NAND},
-		{Name: "XOR", Value: ALU_XOR},
-		{Name: "MOV", Value: ALU_MOV},
-		{Name: "JUMP", Value: ALU_JMP},
+		{Name: "NOP", Value: OP_NOP},
+		{Name: "ADD", Value: OP_ADD},
+		{Name: "SUB", Value: OP_SUB},
+		{Name: "NAND", Value: OP_NAND},
+		{Name: "OR", Value: OP_OR},
+		{Name: "AND", Value: OP_AND},
+		{Name: "XOR", Value: OP_XOR},
+		{Name: "NOT_S1", Value: OP_NOT_S1},
+		{Name: "MOV_S1", Value: OP_MOV_S1},
+		{Name: "MOV_S2", Value: OP_MOV_S2},
+		{Name: "INC_S1", Value: OP_INC_S1},
+		{Name: "DEC_S1", Value: OP_DEC_S1},
+		{Name: "JMP", Value: OP_JMP},
+		{Name: "JZ", Value: OP_JZ},
+		{Name: "JNZ", Value: OP_JNZ},
+		{Name: "JNEG", Value: OP_JNEG},
 	}
 }
-
-// Source/Dest Types (Bits 5-4, 3-2, 1-0)
-const (
-	TYPE_IMMEDIATE_VERTICAL  uint8 = 0
-	TYPE_ADDR_FROM_IMMEDIATE uint8 = 1
-	TYPE_IMMEDIATE_LEFT      uint8 = 2
-	TYPE_IMMEDIATE_RIGHT     uint8 = 3
-)
-
-// Jump Conditions (Bits 1-0, repurposed from destType)
-const (
-	JUMP_Z  uint8 = 0 // Jump if == 0
-	JUMP_NZ uint8 = 1 // Jump if != 0
-	JUMP_GZ uint8 = 2 // Jump if > 0
-	JUMP_LZ uint8 = 3 // Jump if < 0
-)
 
 // IP represents an Instruction Pointer, our digital organism.
 type IP struct {
@@ -105,39 +114,21 @@ func NewIP(id int, soup []int8, x, y, soupDimX int32, use32BitAddressing bool, u
 
 // Step executes a single instruction from the soup.
 func (ip *IP) Step() {
+	// --- Fetch and Decode ---
 	locX, locY := ip.X, ip.Y
+	instruction := uint8(ip.Soup[ip.to1D(locX, locY)])
 
-	// --- Helpers ---
-	fetchX, fetchY := ip.X, ip.Y
-	advanceFetch := func() {
-		fetchX++
-		if fetchX >= ip.SoupDimX {
-			fetchX = 0
-			fetchY++
-		}
-		fetchY = ip.wrap(fetchY, ip.SoupDimY)
-	}
+	aluOp := (instruction >> 4) & 0x0F
+	s1PtrMode := (instruction >> 3) & 0x01
+	s2PtrMode := (instruction >> 2) & 0x01
+	destSel := instruction & 0x03
+	direction := rand.Intn(4)
 
-	// The rule is the byte at the IP's current location.
-	// We advance the fetch pointer past it immediately.
-	ruleDigest := uint8(ip.Soup[ip.to1D(fetchX, fetchY)])
-	advanceFetch()
+	// --- Define Neighbor Locations ---
+	northX, northY := locX, locY-1
+	eastX, eastY := locX+1, locY
 
-	fetch8 := func() int8 {
-		val := ip.Soup[ip.to1D(fetchX, fetchY)]
-		advanceFetch()
-		return val
-	}
-	fetch32 := func() int32 {
-		b1 := byte(fetch8()); b2 := byte(fetch8()); b3 := byte(fetch8()); b4 := byte(fetch8())
-		return int32(binary.BigEndian.Uint32([]byte{b1, b2, b3, b4}))
-	}
-	fetchImmediate := func() int32 {
-		if ip.Use32BitAddressing {
-			return fetch32()
-		}
-		return int32(fetch8())
-	}
+	// --- Helper for address resolution (the "pointer infrastructure") ---
 	resolveAddress := func(baseX, baseY int32, offset int32) int32 {
 		var finalX, finalY int32
 		if ip.UseRelativeAddressing {
@@ -147,7 +138,7 @@ func (ip *IP) Step() {
 				finalX = baseX + dx
 				finalY = baseY + dy
 			} else { // 8-bit relative
-				dx := int32(int8(byte(offset) << 4) >> 4) // sign extend low nibble
+				dx := int32(int8(byte(offset)<<4) >> 4) // sign extend low nibble
 				dy := int32(int8(byte(offset)) >> 4)      // sign extend high nibble
 				finalX = baseX + dx
 				finalY = baseY + dy
@@ -164,103 +155,118 @@ func (ip *IP) Step() {
 		return ip.to1D(finalX, finalY)
 	}
 
-	// --- Decode the 8-bit rule ---
-	// Clustered Layout: [aluOp(2) | src1(2) | src2(2) | dest(2)]
-	aluOp := (ruleDigest >> 6) & 0x03
-	srcType := (ruleDigest >> 4) & 0x03
-	destType := ruleDigest & 0x03
-
-	// --- Rule Execution ---
-	if aluOp == ALU_JMP { // Repurposed aluOp 3 as JUMP
-		var offset int32
-		switch srcType {
-		case TYPE_IMMEDIATE_VERTICAL: offset = fetchImmediate()
-		case TYPE_ADDR_FROM_IMMEDIATE:
-			addr := resolveAddress(locX, locY, fetchImmediate())
-			offset = int32(ip.Soup[addr])
-		case TYPE_IMMEDIATE_LEFT: offset = int32(ip.Soup[ip.to1D(locX-1, locY)])
-		case TYPE_IMMEDIATE_RIGHT: offset = int32(ip.Soup[ip.to1D(locX+1, locY)])
-		}
-		jumpIndex := resolveAddress(locX, locY, offset)
-
-		var condVal int8
-		switch srcType {
-		case TYPE_IMMEDIATE_VERTICAL: condVal = fetch8()
-		case TYPE_ADDR_FROM_IMMEDIATE:
-			addr := resolveAddress(locX, locY, fetchImmediate())
-			condVal = ip.Soup[addr]
-		case TYPE_IMMEDIATE_LEFT: condVal = ip.Soup[ip.to1D(locX-1, locY)]
-		case TYPE_IMMEDIATE_RIGHT: condVal = ip.Soup[ip.to1D(locX+1, locY)]
-		}
-
-		jumpTaken := false
-		switch destType { // Repurposed for condition type
-		case JUMP_Z: if condVal == 0 { jumpTaken = true }
-		case JUMP_NZ: if condVal != 0 { jumpTaken = true }
-		case JUMP_GZ: if condVal > 0 { jumpTaken = true }
-		case JUMP_LZ: if condVal < 0 { jumpTaken = true }
-		}
-
-		if jumpTaken {
-			ip.X = jumpIndex % ip.SoupDimX
-			ip.Y = jumpIndex / ip.SoupDimX
-		}
-
-	} else {
-		// --- ALU LOGIC ---
-		var src1Val, src2Val int8
-		var src1Addr int32 = -1
-
-		switch srcType {
-		case TYPE_IMMEDIATE_VERTICAL:
-			src1Val = ip.Soup[ip.to1D(locX, locY-1)]
-			src2Val = ip.Soup[ip.to1D(locX, locY+1)]
-		case TYPE_ADDR_FROM_IMMEDIATE:
-			src1Addr = resolveAddress(locX, locY, fetchImmediate())
-			src1Val = ip.Soup[src1Addr]
-			addr := resolveAddress(locX, locY, fetchImmediate())
-			src2Val = ip.Soup[addr]
-		case TYPE_IMMEDIATE_LEFT:
-			src1Val = ip.Soup[ip.to1D(locX-1, locY)]
-			src2Val = ip.Soup[ip.to1D(locX+1, locY)]
-		case TYPE_IMMEDIATE_RIGHT:
-			src1Val = ip.Soup[ip.to1D(locX+1, locY)]
-			src2Val = ip.Soup[ip.to1D(locX-1, locY)]
-		}
-
-		var result int8
-		switch aluOp {
-		case ALU_NAND: result = ^(src1Val & src2Val)
-		case ALU_XOR: result = src1Val ^ src2Val
-		case ALU_MOV: result = src2Val
-		}
-
-		switch destType {
-		case 0: // Overwrite self
-			ip.Soup[ip.to1D(locX, locY)] = result
-		case 1: // Overwrite Left Neighbor
-			ip.Soup[ip.to1D(locX-1, locY)] = result
-		case 2: // Overwrite Right Neighbor
-			ip.Soup[ip.to1D(locX+1, locY)] = result
-		case 3: // Write to Address from Src1
-			if src1Addr != -1 {
-				ip.Soup[src1Addr] = result
-			}
-		}
+	// --- Fetch Operands ---
+	var src1Val, src2Val int8
+	var src1Addr, src2Addr int32
+	// Fetch Src1 from North
+	if s1PtrMode == 0 { // Value Mode
+		src1Addr = ip.to1D(northX, northY)
+		src1Val = ip.Soup[src1Addr]
+	} else { // Pointer Mode
+		offset := int32(ip.Soup[ip.to1D(northX, northY)])
+		src1Addr = resolveAddress(northX, northY, offset)
+		src1Val = ip.Soup[src1Addr]
 	}
 
-	// --- Final Random Movement ---
-	direction := rand.Intn(4)
+	// Fetch Src2 from East
+	if s2PtrMode == 0 { // Value Mode
+		src2Addr = ip.to1D(eastX, eastY)
+		src2Val = ip.Soup[src2Addr]
+	} else { // Pointer Mode
+		offset := int32(ip.Soup[ip.to1D(eastX, eastY)])
+		src2Addr = resolveAddress(eastX, eastY, offset)
+		src2Val = ip.Soup[src2Addr]
+	}
+
+	// --- 1. Calculate & Jump Condition Phase ---
+	var result int8
+	jumpTaken := false
+
+	switch aluOp {
+	case OP_NOP:
+		result = int8(instruction)
+	case OP_ADD:
+		result = src1Val + src2Val
+	case OP_SUB:
+		result = src1Val - src2Val
+	case OP_NAND:
+		result = ^(src1Val & src2Val)
+	case OP_OR:
+		result = src1Val | src2Val
+	case OP_AND:
+		result = src1Val & src2Val
+	case OP_XOR:
+		result = src1Val ^ src2Val
+	case OP_NOT_S1:
+		result = ^src1Val
+	case OP_MOV_S1:
+		result = src1Val
+	case OP_MOV_S2:
+		result = src2Val
+	case OP_INC_S1:
+		result = src1Val + 1
+	case OP_DEC_S1:
+		result = src1Val - 1
+	case OP_JMP:
+		jumpTaken = true
+		result = int8(instruction) // Preserve instruction
+	case OP_JZ:
+		if src1Val == 0 {
+			jumpTaken = true
+		}
+		result = int8(instruction) // Preserve instruction
+	case OP_JNZ:
+		if src1Val != 0 {
+			jumpTaken = true
+		}
+		result = int8(instruction) // Preserve instruction
+	case OP_JNEG:
+		if src1Val < 0 {
+			jumpTaken = true
+		}
+		result = int8(instruction) // Preserve instruction
+	default:
+		// Undefined opcodes are NOPs
+		result = int8(instruction)
+	}
+
+	// --- 2. Write Phase ---
+	var destAddr int32
+	switch destSel {
+	case 0:
+		destAddr = src1Addr
+	case 1:
+		destAddr = src2Addr
+	case 2:
+		destAddr = ip.to1D(locX, locY)
+	case 3:
+		// Write to the address pointed to by src2 (the jump address)
+		jumpOffset := int32(src2Val)
+		destAddr = resolveAddress(locX, locY, jumpOffset)
+	}
+	ip.Soup[destAddr] = result
+
+	// --- 3. Jump / Move Phase ---
+	if jumpTaken {
+		jumpOffset := int32(src2Val) // Src2 provides the offset
+		jumpIndex := resolveAddress(locX, locY, jumpOffset)
+		ip.X = jumpIndex % ip.SoupDimX
+		ip.Y = jumpIndex / ip.SoupDimX
+	} 
+	// Move IP
 	switch direction {
-	case 0: ip.Y-- // Up
-	case 1: ip.Y++ // Down
-	case 2: ip.X-- // Left
-	case 3: ip.X++ // Right
+	case 0:
+		ip.Y-- // North
+	case 1:
+		ip.X++ // East
+	case 2:
+		ip.Y++ // South
+	case 3:
+		ip.X-- // West
 	}
 
-	// Ensure the final IP coordinates are wrapped for the next cycle.
+	// --- Final Wrap ---
 	ip.X = ip.wrap(ip.X, ip.SoupDimX)
 	ip.Y = ip.wrap(ip.Y, ip.SoupDimY)
-
 	ip.Steps++
 }
