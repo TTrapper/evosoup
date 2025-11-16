@@ -26,7 +26,7 @@ const (
 
 // GenerationStats holds statistics for a single generation.
 type GenerationStats struct {
-	Generation     int     `json:"Generation"`
+	Generation     string  `json:"Generation"`
 	Population     int     `json:"Population"`
 	StepsPerSecond int64   `json:"StepsPerSecond"`
 	Entropy        float64 `json:"Entropy"`

@@ -27,6 +27,7 @@ type AppState struct {
 	entropies               []float64
 	timeElapsed             int64 // In microseconds
 	cosmicRayRate           uint64
+	startTime               time.Time
 
 	// Control state
 	ipCount             int32
@@ -60,6 +61,7 @@ func NewAppState() *AppState {
 		ipStateChan:           make(chan vm.SavableIP, 100), // Buffered channel for IP state updates
 		ipStopChan:            make(chan struct{}),
 		visRequestChan:        make(chan struct{}, 1),
+		startTime:             time.Now(),
 	}
 	// Set a default cosmic ray rate.
 	atomic.StoreUint64(&s.cosmicRayRate, math.Float64bits(0.001))
@@ -385,7 +387,7 @@ func (s *AppState) RunStatistics(hub *Hub) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	var frameIndex = 0
+	var lastTotalSteps int64
 	for {
 		if atomic.LoadInt32(&s.paused) == 1 {
 			time.Sleep(100 * time.Millisecond) // Prevent busy-waiting
@@ -400,12 +402,11 @@ func (s *AppState) RunStatistics(hub *Hub) {
 				totalSteps += ip.Steps
 				return true
 			})
-			var stepsPerSecond int64 = 0
-//			var stepsPerSecond = 1000000 * totalSteps / atomic.LoadInt64(&s.timeElapsed)
+			stepsPerSecond := totalSteps - lastTotalSteps
+			lastTotalSteps = totalSteps
 
 			// Soup Entropy
 			soupCounts := make(map[int32]int)
-			frameIndex++
 			for _, instr := range s.soup[:StatsAndVisSize] {
 				soupCounts[int32(instr)]++
 			}
@@ -417,8 +418,15 @@ func (s *AppState) RunStatistics(hub *Hub) {
 				}
 			}
 			s.entropies = append(s.entropies, soupEntropy)
+
+			elapsed := time.Since(s.startTime)
+			hours := int(elapsed.Hours())
+			minutes := int(elapsed.Minutes()) % 60
+			seconds := int(elapsed.Seconds()) % 60
+			timeString := fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+
 			stats := GenerationStats{
-				Generation:     frameIndex,
+				Generation:     timeString,
 				Population:     int(atomic.LoadInt32(&s.ipCount)),
 				StepsPerSecond: stepsPerSecond,
 				Entropy:        soupEntropy,
