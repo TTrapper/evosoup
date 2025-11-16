@@ -32,6 +32,8 @@ type InstructionInfoMessage struct {
 type SimParamsMessage struct {
 	Type          string  `json:"type"`
 	CosmicRayRate float64 `json:"cosmicRayRate"`
+	SoupSize      int     `json:"soupSize"`
+	SoupGridDim   int     `json:"soupGridDim"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -251,6 +253,8 @@ func (c *Client) sendSimParams() error {
 	msg := SimParamsMessage{
 		Type:          "sim_params",
 		CosmicRayRate: p,
+		SoupSize:      SoupSize,
+		SoupGridDim:   SoupGridDim,
 	}
 
 	encodedMsg, err := json.Marshal(msg)

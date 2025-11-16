@@ -277,11 +277,10 @@ func (s *AppState) SetViewStartIndex(index int) {
 	if index < 0 {
 		index = 0
 	}
-	if index >= SoupSize {
-		index = SoupSize - StatsAndVisSize // Ensure it doesn't go out of bounds
-	}
+	// The client is now responsible for sending a valid, block-aligned index.
+	// The old boundary check was incorrect for a 2D-sampled view.
 	s.viewStartIndex = index
-	s.viewEndIndex = s.viewStartIndex + StatsAndVisSize
+	s.viewEndIndex = s.viewStartIndex + StatsAndVisSize // This is not strictly needed by the new vis logic
 
 	// Request a visualization update, especially important when paused.
 	select {
@@ -348,21 +347,37 @@ func (s *AppState) RunVisualization(hub *Hub) {
 	currentIndices := make([]byte, StatsAndVisSize) // Allocate once
 
 	sendFrame := func() {
-		// Ensure viewStartIndex and viewEndIndex are within bounds
+		// viewStartIndex is the 1D index of the top-left pixel of the view block.
 		currentViewStartIndex := s.viewStartIndex
-		currentViewEndIndex := s.viewEndIndex
-		if currentViewEndIndex > SoupSize {
-			currentViewEndIndex = SoupSize
-			currentViewStartIndex = SoupSize - StatsAndVisSize
-		}
-		if currentViewStartIndex < 0 {
-			currentViewStartIndex = 0
-			currentViewEndIndex = StatsAndVisSize
-		}
 
-		// Create the color index map from the current soup state
-		for i, val := range s.soup[currentViewStartIndex:currentViewEndIndex] {
-			currentIndices[i] = byte(val)
+		viewDim := int(math.Sqrt(float64(StatsAndVisSize))) // e.g., 1024
+
+		// The index in the destination buffer (currentIndices)
+		destIndex := 0
+
+		// Top-left coordinates of the view block in the global soup grid
+		startX := currentViewStartIndex % SoupDimX
+		startY := currentViewStartIndex / SoupDimX
+
+		for y := 0; y < viewDim; y++ {
+			// The Y coordinate in the global soup, with wrapping
+			sourceY := (startY + y) % SoupDimY
+
+			// The start of this row in the 1D soup array
+			sourceRowStart := sourceY * SoupDimX
+
+			for x := 0; x < viewDim; x++ {
+				// The X coordinate in the global soup, with wrapping
+				sourceX := (startX + x) % SoupDimX
+
+				// The final 1D index in the soup array
+				sourceIndex := sourceRowStart + sourceX
+
+				if sourceIndex < len(s.soup) && destIndex < len(currentIndices) {
+					currentIndices[destIndex] = byte(s.soup[sourceIndex])
+					destIndex++
+				}
+			}
 		}
 
 		// Send the raw byte slice to the hub's public broadcast channel.

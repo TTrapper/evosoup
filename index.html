@@ -111,10 +111,12 @@
         <div id="controls-buttons">
             <button id="playPauseButton">Pause</button>
         </div>
-        <div id="paging-controls">
-            <button id="prevPage">&lt;</button>
-            <span id="pageInfo">Page ? / ?</span>
-            <button id="nextPage">&gt;</button>
+        <div id="paging-controls" style="display: grid; grid-template-columns: repeat(3, 40px); grid-template-rows: repeat(3, 40px); gap: 5px; justify-content: center; align-items: center; width: 130px;">
+            <div style="grid-column: 2; grid-row: 1;"><button id="pageUp">▲</button></div>
+            <div style="grid-column: 1; grid-row: 2;"><button id="pageLeft">◄</button></div>
+            <div id="pageInfo" style="grid-column: 2; grid-row: 2; display: flex; justify-content: center; align-items: center;"></div>
+            <div style="grid-column: 3; grid-row: 2;"><button id="pageRight">►</button></div>
+            <div style="grid-column: 2; grid-row: 3;"><button id="pageDown">▼</button></div>
         </div>
         <div id="addressing-modes">
             <label><input type="checkbox" id="32BitAddressing"> 32-bit Addressing</label>
@@ -305,9 +307,12 @@
         let viewMode = 'colormap';
         let lastColorIndices = null;
         let isPaused = false;
-        let soupTotalSize = 1024*1024;
+        let soupTotalSize = 0;
         let soupPageSize = 0;
         let currentViewStartIndex = 0;
+        let soupGridDim = 0;
+        let currentPageX = 0;
+        let currentPageY = 0;
 
         // --- WebSocket Connection ---
         const socket = new WebSocket('ws://localhost:8080/ws');
@@ -360,6 +365,7 @@
                 } else if (data.type === 'sim_params') {
                     const probability = data.cosmicRayRate;
                     soupTotalSize = data.soupSize;
+                    soupGridDim = data.soupGridDim;
 
                     const maxSliderValue = 1000;
                     let sliderValue = 0;
@@ -369,34 +375,35 @@
 
                     cosmicRayRateSlider.value = sliderValue;
                     cosmicRayRateValueSpan.textContent = formatProbability(probability);
+                    updatePageInfo();
                 } else if (data.Generation !== undefined) {
                     genSpan.textContent = data.Generation;
                     stepsSpan.textContent = (data.StepsPerSecond).toLocaleString();
                     entropySpan.textContent = data.Entropy.toFixed(2);
                 } else if (data.ID !== undefined) {
                     trackedIpIdSpan.textContent = data.ID;
-                    const currentPtr = data.Y * soupWidth + data.X;
+                    const totalSoupWidth = soupWidth * soupGridDim;
+                    const currentPtr = data.Y * totalSoupWidth + data.X;
                     trackedIpPositionSpan.textContent = `(${data.X}, ${data.Y})`;
 
                     highlightedIpPtr = currentPtr;
 
                     if (followIpCheckbox.checked && highlightedIpPtr !== -1 && soupWidth > 0) {
-                        const localSoupPageSize = soupWidth * soupHeight;
-                        const ipPageStartIndex = Math.floor(highlightedIpPtr / localSoupPageSize) * localSoupPageSize;
+                        const ipPageX = Math.floor(data.X / soupWidth);
+                        const ipPageY = Math.floor(data.Y / soupHeight);
 
-                        if (ipPageStartIndex !== currentViewStartIndex) {
-                            currentViewStartIndex = ipPageStartIndex;
-                            sendViewStartIndex(currentViewStartIndex);
-                            updatePageInfo();
+                        if (ipPageX !== currentPageX || ipPageY !== currentPageY) {
+                            currentPageX = ipPageX;
+                            currentPageY = ipPageY;
+                            updateView();
                         }
 
-                        const relativePtr = highlightedIpPtr - currentViewStartIndex;
-                        const pixelX = relativePtr % soupWidth;
-                        const pixelY = Math.floor(relativePtr / soupWidth);
+                        const relativeX = data.X % soupWidth;
+                        const relativeY = data.Y % soupHeight;
                         const targetZoom = 16;
 
-                        offsetX = (canvas.width / 2) - (pixelX * targetZoom);
-                        offsetY = (canvas.height / 2) - (pixelY * targetZoom);
+                        offsetX = (canvas.width / 2) - (relativeX * targetZoom);
+                        offsetY = (canvas.height / 2) - (relativeY * targetZoom);
                         zoom = targetZoom;
                     }
                     requestAnimationFrame(draw);
@@ -477,10 +484,14 @@
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            const soupX = Math.floor((x - offsetX) / zoom);
-            const soupY = Math.floor((y - offsetY) / zoom);
+            const viewX = Math.floor((x - offsetX) / zoom);
+            const viewY = Math.floor((y - offsetY) / zoom);
 
-            const soupAddress = currentViewStartIndex + (soupY * soupWidth) + soupX;
+            const soupX = currentPageX * soupWidth + viewX;
+            const soupY = currentPageY * soupHeight + viewY;
+
+            const totalSoupWidth = soupWidth * soupGridDim;
+            const soupAddress = soupY * totalSoupWidth + soupX;
 
             const message = {
                 type: "set_ip_ptr",
@@ -538,8 +549,10 @@
         const stepButton = document.getElementById('stepButton');
         const followIpCheckbox = document.getElementById('followIpCheckbox');
 
-        const prevPageButton = document.getElementById('prevPage');
-        const nextPageButton = document.getElementById('nextPage');
+        const pageUpButton = document.getElementById('pageUp');
+        const pageDownButton = document.getElementById('pageDown');
+        const pageLeftButton = document.getElementById('pageLeft');
+        const pageRightButton = document.getElementById('pageRight');
 
         const bit32AddressingCheckbox = document.getElementById('32BitAddressing');
         const relativeAddressingCheckbox = document.getElementById('relativeAddressing');
@@ -549,7 +562,7 @@
         const trackedIpPositionSpan = document.getElementById('trackedIpPosition');
         const trackedIpInstructionSpan = document.getElementById('trackedIpInstruction');
         const instructionHistoryDiv = document.getElementById('instructionHistory');
-        const pageInfoSpan = document.getElementById('pageInfo');
+        const pageInfoSpan = document.getElementById('pageInfo'); // This is now a div
 
         function showRightPanel() {
             rightPanel.style.display = 'block';
@@ -600,13 +613,49 @@
         }
 
         function updatePageInfo() {
-            if (!soupPageSize || !soupTotalSize) return;
-            const currentPage = (currentViewStartIndex / soupPageSize) + 1;
-            const totalPages = Math.ceil(soupTotalSize / soupPageSize);
-            pageInfoSpan.textContent = `Page ${currentPage} / ${totalPages}`;
+            if (!soupGridDim) return;
 
-            prevPageButton.disabled = (currentPage <= 1);
-            nextPageButton.disabled = (currentPage >= totalPages);
+            pageInfoSpan.innerHTML = '';
+
+            const table = document.createElement('table');
+            table.style.borderCollapse = 'collapse';
+            
+            const containerSize = 38;
+            const cellSize = Math.max(2, Math.floor(containerSize / soupGridDim) - 2);
+
+
+            for (let y = 0; y < soupGridDim; y++) {
+                const row = document.createElement('tr');
+                for (let x = 0; x < soupGridDim; x++) {
+                    const cell = document.createElement('td');
+                    cell.style.width = `${cellSize}px`;
+                    cell.style.height = `${cellSize}px`;
+                    cell.style.border = '1px solid #888';
+                    cell.style.backgroundColor = '#444';
+                    cell.style.padding = '0';
+
+
+                    if (x === currentPageX && y === currentPageY) {
+                        cell.style.backgroundColor = '#eee';
+                    }
+                    row.appendChild(cell);
+                }
+                table.appendChild(row);
+            }
+            pageInfoSpan.appendChild(table);
+        }
+
+        function updateView() {
+            if (!soupGridDim || !soupPageSize) return;
+
+            const totalSoupWidth = soupGridDim * soupWidth;
+            const startY = currentPageY * soupHeight;
+            const startX = currentPageX * soupWidth;
+
+            currentViewStartIndex = startY * totalSoupWidth + startX;
+
+            sendViewStartIndex(currentViewStartIndex);
+            updatePageInfo();
         }
 
         playPauseButton.addEventListener('click', () => {
@@ -627,23 +676,24 @@
 
         stepButton.addEventListener('click', () => sendCommand('step'));
 
-        prevPageButton.addEventListener('click', () => {
-            if (currentViewStartIndex > 0) {
-                currentViewStartIndex -= soupPageSize;
-                sendViewStartIndex(currentViewStartIndex);
-                updatePageInfo();
-            }
+        pageUpButton.addEventListener('click', () => {
+            currentPageY = (currentPageY - 1 + soupGridDim) % soupGridDim;
+            updateView();
         });
 
-        nextPageButton.addEventListener('click', () => {
-            if (!soupTotalSize || !soupPageSize) return;
-            const totalPages = Math.ceil(soupTotalSize / soupPageSize);
-            const maxStartIndex = (totalPages - 1) * soupPageSize;
-            if (currentViewStartIndex < maxStartIndex) {
-                currentViewStartIndex += soupPageSize;
-                sendViewStartIndex(currentViewStartIndex);
-                updatePageInfo();
-            }
+        pageDownButton.addEventListener('click', () => {
+            currentPageY = (currentPageY + 1) % soupGridDim;
+            updateView();
+        });
+
+        pageLeftButton.addEventListener('click', () => {
+            currentPageX = (currentPageX - 1 + soupGridDim) % soupGridDim;
+            updateView();
+        });
+
+        pageRightButton.addEventListener('click', () => {
+            currentPageX = (currentPageX + 1) % soupGridDim;
+            updateView();
         });
 
         bit32AddressingCheckbox.addEventListener('change', (event) => {

@@ -10,16 +10,17 @@ import (
 
 // --- Simulation Constants ---
 const (
-	SoupDimX              = 1024
-	SoupDimY              = 1024
+	SoupGridDim           = 1    // Creates a (SoupGridDim x SoupGridDim) grid of blocks.
+	VisDim                = 1024 // Dimension of the square visualization area (a single block).
+	SoupDimX              = SoupGridDim * VisDim
+	SoupDimY              = SoupGridDim * VisDim
 	SoupSize              = SoupDimX * SoupDimY
-	InitialNumIPs         = 8192
-	TargetFPS             = 30  // Target a smooth FPS
+	InitialNumIPs         = 8192 * (SoupGridDim * SoupGridDim)
+	TargetFPS             = 30 // Target a smooth FPS
 
 	// StatsAndVisSize represents the portion of the soup used for statistics and
-	// visualization, corresponding to 1M instructions.
-	StatsAndVisSize = 1024 * 1024
-
+	// visualization, corresponding to a single 1024x1024 block.
+	StatsAndVisSize = VisDim * VisDim
 )
 
 // --- Structs ---
