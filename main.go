@@ -86,9 +86,6 @@ func main() {
 
 	go appState.RunStatistics(hub)
 
-	// --- IP State Broadcaster Goroutine ---
-	go appState.RunIPStateBroadcaster(hub)
-
 	// --- Snapshotting goroutine ---
 	go func() {
 		ticker := time.NewTicker(time.Second * 600)
@@ -110,28 +107,33 @@ func main() {
 	}()
 
 	// --- 7. Main Simulation Control Loop ---
-	if *experimentDuration < 0 {
-		fmt.Printf("Negative experiment duration provided, running forever.\n")
-		for {
-			select {
-			case isPaused := <-hub.Pause:
-				if isPaused {
-					appState.Pause()
-				} else {
-					appState.Resume()
-				}
-			case cosmicRayRate := <-hub.SetCosmicRayRate:
-				appState.SetCosmicRayRate(cosmicRayRate)
+	var experimentTimer <-chan time.Time
+	if *experimentDuration >= 0 {
+		log.Printf("Experiment will run for %d minutes.", *experimentDuration)
+		experimentTimer = time.After(time.Duration(*experimentDuration) * time.Minute)
+	} else {
+		log.Println("Negative experiment duration provided, running forever.")
+	}
+
+	for {
+		select {
+		case isPaused := <-hub.Pause:
+			if isPaused {
+				appState.Pause()
+			} else {
+				appState.Resume()
 			}
+		case cosmicRayRate := <-hub.SetCosmicRayRate:
+			appState.SetCosmicRayRate(cosmicRayRate)
+		case <-experimentTimer:
+			log.Println("Experiment duration finished.")
+			// --- 8. Save final state and entropies ---
+			if err := appState.saveSnapshot(*snapshotFilename); err != nil {
+				log.Fatalf("failed to save final snapshot: %v", err)
+			}
+			log.Printf("--- Experiment finished. Snapshot saved to %s. ---\n", *snapshotFilename)
+			return // Exit main
 		}
 	}
-	<-time.After(time.Duration(*experimentDuration) * time.Minute)
-
-	// --- 8. Save final state and entropies ---
-	if err := appState.saveSnapshot(*snapshotFilename); err != nil {
-		log.Fatalf("failed to save final snapshot: %v", err)
-	}
-
-	fmt.Printf("--- Experiment finished. Snapshot and entropies saved.---\n")
 }
 

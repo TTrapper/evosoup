@@ -43,10 +43,6 @@ type AppState struct {
 	viewStartIndex int
 	viewEndIndex   int
 	visRequestChan chan struct{} // For on-demand visualization updates
-
-	// IP Tracking
-	trackingEnabled bool
-	ipStateChan     chan vm.SavableIP
 }
 
 // NewAppState initializes a new simulation state.
@@ -57,8 +53,6 @@ func NewAppState() *AppState {
 		viewEndIndex:          StatsAndVisSize,
 		Use32BitAddressing:    false,
 		UseRelativeAddressing: true,
-		trackingEnabled:       false,
-		ipStateChan:           make(chan vm.SavableIP, 100), // Buffered channel for IP state updates
 		ipStopChan:            make(chan struct{}),
 		visRequestChan:        make(chan struct{}, 1),
 		startTime:             time.Now(),
@@ -168,18 +162,7 @@ func (s *AppState) runIP(p *vm.IP) {
 	}
 }
 
-// RunIPStateBroadcaster sends the tracked IP's state to the UI.
-func (s *AppState) RunIPStateBroadcaster(hub *Hub) {
-	for ipState := range s.ipStateChan {
-		log.Printf("Broadcasting IP state for IP %d", ipState.ID)
-		jsonData, err := json.Marshal(ipState)
-		if err != nil {
-			log.Printf("error marshalling IP state: %v", err)
-		} else {
-			hub.Broadcast <- jsonData
-		}
-	}
-}
+
 
 // LaunchIPs starts the execution goroutines for all IPs in the population.
 func (s *AppState) LaunchIPs() {
@@ -247,26 +230,17 @@ func (s *AppState) Resume() {
 func (s *AppState) Step() {
 	log.Println("Stepping simulation")
 	if atomic.LoadInt32(&s.paused) == 1 {
-		if s.trackingEnabled {
-			if val, ok := s.population.Load(1); ok { // Always track IP with ID 1
-				ip := val.(*vm.IP)
-				ip.Step() // Execute one step for the tracked IP
-				log.Printf("Stepped tracked IP %d. Sending state.", ip.ID)
-				s.ipStateChan <- ip.CurrentState() // Send its state
-			} else {
-				log.Printf("Tracked IP with ID 1 not found.")
-			}
-		} else {
-			// If tracking is not enabled, step all IPs
-			s.population.Range(func(key, value interface{}) bool {
-				ip := value.(*vm.IP)
-				ip.Step()
-				return true
-			})
-			log.Println("Stepped all IPs.")
+		s.population.Range(func(key, value interface{}) bool {
+			ip := value.(*vm.IP)
+			ip.Step()
+			return true
+		})
+		log.Println("Stepped all IPs.")
+		// Request a visualization update to show the result of the step.
+		select {
+		case s.visRequestChan <- struct{}{}:
+		default:
 		}
-		// Keep the simulation paused after the step
-		atomic.StoreInt32(&s.paused, 1)
 	} else {
 		log.Println("Step command received, but simulation is not paused.")
 	}
@@ -309,23 +283,7 @@ func (s *AppState) Set32BitAddressing(enabled bool) {
 	})
 }
 
-// SetTrackingEnabled sets the tracking state of the first IP.
-func (s *AppState) SetTrackingEnabled(enabled bool) {
-	s.trackingEnabled = enabled
-	if enabled {
-		log.Println("IP tracking enabled.")
-		// When tracking is enabled, immediately send the current state of the tracked IP.
-		if val, ok := s.population.Load(1); ok { // Always track IP with ID 1
-			ip := val.(*vm.IP)
-			log.Printf("Sending initial state for tracked IP %d.", ip.ID)
-			s.ipStateChan <- ip.CurrentState()
-		} else {
-			log.Printf("Tracked IP with ID 1 not found for initial state send.")
-		}
-	} else {
-		log.Println("IP tracking disabled.")
-	}
-}
+
 
 // SetIPPtr sets the X, Y of a specific IP from a 1D pointer.
 func (s *AppState) SetIPPtr(id int, ptr int32) {
@@ -347,41 +305,65 @@ func (s *AppState) RunVisualization(hub *Hub) {
 	currentIndices := make([]byte, StatsAndVisSize) // Allocate once
 
 	sendFrame := func() {
-		// viewStartIndex is the 1D index of the top-left pixel of the view block.
+		// --- Send Soup Frame ---
 		currentViewStartIndex := s.viewStartIndex
-
-		viewDim := int(math.Sqrt(float64(StatsAndVisSize))) // e.g., 1024
-
-		// The index in the destination buffer (currentIndices)
+		viewDim := int(math.Sqrt(float64(StatsAndVisSize)))
 		destIndex := 0
-
-		// Top-left coordinates of the view block in the global soup grid
 		startX := currentViewStartIndex % SoupDimX
 		startY := currentViewStartIndex / SoupDimX
 
 		for y := 0; y < viewDim; y++ {
-			// The Y coordinate in the global soup, with wrapping
 			sourceY := (startY + y) % SoupDimY
-
-			// The start of this row in the 1D soup array
 			sourceRowStart := sourceY * SoupDimX
-
 			for x := 0; x < viewDim; x++ {
-				// The X coordinate in the global soup, with wrapping
 				sourceX := (startX + x) % SoupDimX
-
-				// The final 1D index in the soup array
 				sourceIndex := sourceRowStart + sourceX
-
 				if sourceIndex < len(s.soup) && destIndex < len(currentIndices) {
 					currentIndices[destIndex] = byte(s.soup[sourceIndex])
 					destIndex++
 				}
 			}
 		}
-
-		// Send the raw byte slice to the hub's public broadcast channel.
 		hub.Broadcast <- currentIndices
+
+		// --- Send IP Locations ---
+		type IPLocation struct {
+			X int32 `json:"x"`
+			Y int32 `json:"y"`
+		}
+		var locations []IPLocation
+
+		viewStartX := int32(startX)
+		viewStartY := int32(startY)
+		viewDim32 := int32(viewDim)
+
+		s.population.Range(func(key, value interface{}) bool {
+			ip := value.(*vm.IP)
+			// Normalize IP coordinates to be "after" the view start, handling wrap-around.
+			dx := (ip.X - viewStartX + SoupDimX) % SoupDimX
+			dy := (ip.Y - viewStartY + SoupDimY) % SoupDimY
+
+			if dx < viewDim32 && dy < viewDim32 {
+				locations = append(locations, IPLocation{X: ip.X, Y: ip.Y})
+			}
+			return true
+		})
+
+		if len(locations) > 0 {
+			ipLocationsMsg := struct {
+				Type      string       `json:"type"`
+				Locations []IPLocation `json:"locations"`
+			}{
+				Type:      "ip_locations",
+				Locations: locations,
+			}
+			jsonData, err := json.Marshal(ipLocationsMsg)
+			if err != nil {
+				log.Printf("error marshalling IP locations: %v", err)
+			} else {
+				hub.Broadcast <- jsonData
+			}
+		}
 	}
 
 	for {
@@ -391,8 +373,6 @@ func (s *AppState) RunVisualization(hub *Hub) {
 				sendFrame()
 			}
 		case <-s.visRequestChan:
-			// Always send a frame on request. This is for paging when paused,
-			// or for the initial frame on pause.
 			sendFrame()
 		}
 	}

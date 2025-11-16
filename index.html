@@ -71,30 +71,6 @@
         #addressing-modes label {
             margin-right: 10px;
         }
-
-        #trackedIpState p {
-            margin: 5px 0;
-        }
-        #right-panel {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 300px; /* Adjust as needed */
-            background-color: rgba(46, 46, 46, 0.8);
-            padding: 10px;
-            border-radius: 5px;
-            border: 1px solid #555;
-            color: #d3d3d3;
-        }
-        #right-panel h2,
-        #right-panel h3 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            color: #eee;
-        }
-        #right-panel p {
-            margin: 5px 0;
-        }
     </style>
 </head>
 <body>
@@ -114,7 +90,6 @@
         <div id="paging-controls" style="display: grid; grid-template-columns: repeat(3, 40px); grid-template-rows: repeat(3, 40px); gap: 5px; justify-content: center; align-items: center; width: 130px;">
             <div style="grid-column: 2; grid-row: 1;"><button id="pageUp">▲</button></div>
             <div style="grid-column: 1; grid-row: 2;"><button id="pageLeft">◄</button></div>
-            <div id="pageInfo" style="grid-column: 2; grid-row: 2; display: flex; justify-content: center; align-items: center;"></div>
             <div style="grid-column: 3; grid-row: 2;"><button id="pageRight">►</button></div>
             <div style="grid-column: 2; grid-row: 3;"><button id="pageDown">▼</button></div>
         </div>
@@ -125,21 +100,9 @@
         <div id="view-mode-controls">
             <label><input type="radio" name="viewMode" value="colormap" checked> Colormap</label>
             <label><input type="radio" name="viewMode" value="heatmap"> Heatmap</label>
+            <label><input type="checkbox" id="showIpsCheckbox"> Show IPs</label>
         </div>
         <div id="opcode-legend"></div>
-    </div>
-
-    <div id="right-panel" style="display: none;">
-        <h2>Tracked IP State</h2>
-        <div id="trackedIpState">
-            <p>ID: <span id="trackedIpId">-</span></p>
-            <p>Position: <span id="trackedIpPosition">-</span></p>
-            <p>Instruction: <span id="trackedIpInstruction">-</span></p>
-            <button id="stepButton">Step</button>
-            <label><input type="checkbox" id="followIpCheckbox" checked> Follow IP</label>
-        </div>
-        <h3>Instruction History</h3>
-        <div id="instructionHistory" style="max-height: 200px; overflow-y: scroll; border: 1px solid #555; padding: 5px;"></div>
     </div>
 
     <script>
@@ -303,7 +266,7 @@
         let soupWidth = 0;
         let soupHeight = 0;
         let isDragging = false;
-        let highlightedIpPtr = -1;
+        let ipLocations = [];
         let viewMode = 'colormap';
         let lastColorIndices = null;
         let isPaused = false;
@@ -337,15 +300,25 @@
             ctx.scale(zoom, zoom);
             ctx.drawImage(offscreenCanvas, 0, 0);
 
-            if (highlightedIpPtr !== -1 && soupWidth > 0) {
-                const relativePtr = highlightedIpPtr - currentViewStartIndex;
-                if (relativePtr >= 0 && relativePtr < (soupWidth * soupHeight)) {
-                    const pixelX = relativePtr % soupWidth;
-                    const pixelY = Math.floor(relativePtr / soupWidth);
+            const showIpsCheckbox = document.getElementById('showIpsCheckbox');
+            if (showIpsCheckbox.checked && ipLocations && ipLocations.length > 0) {
+                for (const ip of ipLocations) {
+                    const localX = ip.x % soupWidth;
+                    const localY = ip.y % soupHeight;
 
-                    ctx.strokeStyle = 'yellow';
-                    ctx.lineWidth = 2 / zoom;
-                    ctx.strokeRect(pixelX, pixelY, 1, 1);
+                    if (viewMode === 'colormap') {
+                        // White outline with black border for max contrast, drawn inside the pixel
+                        ctx.strokeStyle = 'white';
+                        ctx.lineWidth = 2 / zoom;
+                        ctx.strokeRect(localX + 0.1, localY + 0.1, 0.8, 0.8);
+                        ctx.strokeStyle = 'black';
+                        ctx.lineWidth = 1 / zoom;
+                        ctx.strokeRect(localX + 0.1, localY + 0.1, 0.8, 0.8);
+                    } else { // heatmap
+                        ctx.strokeStyle = 'yellow';
+                        ctx.lineWidth = 1 / zoom;
+                        ctx.strokeRect(localX, localY, 1, 1);
+                    }
                 }
             }
 
@@ -375,49 +348,13 @@
 
                     cosmicRayRateSlider.value = sliderValue;
                     cosmicRayRateValueSpan.textContent = formatProbability(probability);
-                    updatePageInfo();
+                } else if (data.type === 'ip_locations') {
+                    ipLocations = data.locations;
+                    requestAnimationFrame(draw);
                 } else if (data.Generation !== undefined) {
                     genSpan.textContent = data.Generation;
                     stepsSpan.textContent = (data.StepsPerSecond).toLocaleString();
                     entropySpan.textContent = data.Entropy.toFixed(2);
-                } else if (data.ID !== undefined) {
-                    trackedIpIdSpan.textContent = data.ID;
-                    const totalSoupWidth = soupWidth * soupGridDim;
-                    const currentPtr = data.Y * totalSoupWidth + data.X;
-                    trackedIpPositionSpan.textContent = `(${data.X}, ${data.Y})`;
-
-                    highlightedIpPtr = currentPtr;
-
-                    if (followIpCheckbox.checked && highlightedIpPtr !== -1 && soupWidth > 0) {
-                        const ipPageX = Math.floor(data.X / soupWidth);
-                        const ipPageY = Math.floor(data.Y / soupHeight);
-
-                        if (ipPageX !== currentPageX || ipPageY !== currentPageY) {
-                            currentPageX = ipPageX;
-                            currentPageY = ipPageY;
-                            updateView();
-                        }
-
-                        const relativeX = data.X % soupWidth;
-                        const relativeY = data.Y % soupHeight;
-                        const targetZoom = 16;
-
-                        offsetX = (canvas.width / 2) - (relativeX * targetZoom);
-                        offsetY = (canvas.height / 2) - (relativeY * targetZoom);
-                        zoom = targetZoom;
-                    }
-                    requestAnimationFrame(draw);
-
-                    const instructionValue = data.CurrentInstruction;
-                    const instructionHex = "0x" + instructionValue.toString(16).padStart(2, '0');
-                    trackedIpInstructionSpan.textContent = instructionHex;
-
-                    const historyItem = document.createElement('div');
-                    historyItem.textContent = `ID: ${data.ID}, Pos: (${data.X},${data.Y}), Instr: ${instructionHex}`;
-                    instructionHistoryDiv.prepend(historyItem);
-                    if (instructionHistoryDiv.children.length > 50) {
-                        instructionHistoryDiv.removeChild(instructionHistoryDiv.lastChild);
-                    }
                 }
             } else if (event.data instanceof ArrayBuffer) {
                 const colorIndices = new Uint8Array(event.data);
@@ -436,7 +373,6 @@
                     offsetX = (canvasContainer.clientWidth - soupWidth * zoom) / 2;
                     offsetY = (canvasContainer.clientHeight - soupHeight * zoom) / 2;
                 }
-                updatePageInfo();
                 renderSoup();
             }
         };
@@ -546,8 +482,6 @@
 
         // --- Command Buttons ---
         const playPauseButton = document.getElementById('playPauseButton');
-        const stepButton = document.getElementById('stepButton');
-        const followIpCheckbox = document.getElementById('followIpCheckbox');
 
         const pageUpButton = document.getElementById('pageUp');
         const pageDownButton = document.getElementById('pageDown');
@@ -556,21 +490,6 @@
 
         const bit32AddressingCheckbox = document.getElementById('32BitAddressing');
         const relativeAddressingCheckbox = document.getElementById('relativeAddressing');
-
-        const rightPanel = document.getElementById('right-panel');
-        const trackedIpIdSpan = document.getElementById('trackedIpId');
-        const trackedIpPositionSpan = document.getElementById('trackedIpPosition');
-        const trackedIpInstructionSpan = document.getElementById('trackedIpInstruction');
-        const instructionHistoryDiv = document.getElementById('instructionHistory');
-        const pageInfoSpan = document.getElementById('pageInfo'); // This is now a div
-
-        function showRightPanel() {
-            rightPanel.style.display = 'block';
-        }
-
-        function hideRightPanel() {
-            rightPanel.style.display = 'none';
-        }
 
         function sendCommand(command) {
             const message = {
@@ -602,48 +521,16 @@
             }
         }
 
-        function sendTrackingEnabled(enabled) {
-            const message = {
-                type: "set_tracking_enabled",
-                value: enabled ? 1 : 0
-            };
-            if (socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify(message));
+        playPauseButton.addEventListener('click', () => {
+            if (isPaused) {
+                sendCommand('resume');
+                playPauseButton.textContent = 'Pause';
+            } else {
+                sendCommand('pause');
+                playPauseButton.textContent = 'Play';
             }
-        }
-
-        function updatePageInfo() {
-            if (!soupGridDim) return;
-
-            pageInfoSpan.innerHTML = '';
-
-            const table = document.createElement('table');
-            table.style.borderCollapse = 'collapse';
-            
-            const containerSize = 38;
-            const cellSize = Math.max(2, Math.floor(containerSize / soupGridDim) - 2);
-
-
-            for (let y = 0; y < soupGridDim; y++) {
-                const row = document.createElement('tr');
-                for (let x = 0; x < soupGridDim; x++) {
-                    const cell = document.createElement('td');
-                    cell.style.width = `${cellSize}px`;
-                    cell.style.height = `${cellSize}px`;
-                    cell.style.border = '1px solid #888';
-                    cell.style.backgroundColor = '#444';
-                    cell.style.padding = '0';
-
-
-                    if (x === currentPageX && y === currentPageY) {
-                        cell.style.backgroundColor = '#eee';
-                    }
-                    row.appendChild(cell);
-                }
-                table.appendChild(row);
-            }
-            pageInfoSpan.appendChild(table);
-        }
+            isPaused = !isPaused;
+        });
 
         function updateView() {
             if (!soupGridDim || !soupPageSize) return;
@@ -655,26 +542,7 @@
             currentViewStartIndex = startY * totalSoupWidth + startX;
 
             sendViewStartIndex(currentViewStartIndex);
-            updatePageInfo();
         }
-
-        playPauseButton.addEventListener('click', () => {
-            if (isPaused) {
-                sendCommand('resume');
-                hideRightPanel();
-                sendTrackingEnabled(false);
-                highlightedIpPtr = -1;
-                playPauseButton.textContent = 'Pause';
-            } else {
-                sendCommand('pause');
-                showRightPanel();
-                sendTrackingEnabled(true);
-                playPauseButton.textContent = 'Play';
-            }
-            isPaused = !isPaused;
-        });
-
-        stepButton.addEventListener('click', () => sendCommand('step'));
 
         pageUpButton.addEventListener('click', () => {
             currentPageY = (currentPageY - 1 + soupGridDim) % soupGridDim;
@@ -719,12 +587,6 @@
 
         // Initial setup
         new ResizeObserver(draw).observe(canvasContainer);
-
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter' && rightPanel.style.display === 'block') {
-                stepButton.click();
-            }
-        });
 
         socket.onopen = function(event) {
             console.log("WebSocket connection established.");

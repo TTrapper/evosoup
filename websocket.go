@@ -97,9 +97,9 @@ func (c *Client) readPump() {
 			log.Printf("Received command: %s", msg.Command)
 			switch msg.Command {
 			case "pause":
-				c.appState.Pause()
+				c.hub.Pause <- true
 			case "resume":
-				c.appState.Resume()
+				c.hub.Pause <- false
 			case "step":
 				c.appState.Step()
 			default:
@@ -111,12 +111,6 @@ func (c *Client) readPump() {
 		case "set_32_bit_addressing":
 			log.Printf("Received set_32_bit_addressing: %t", msg.Value == 1)
 			c.appState.Set32BitAddressing(msg.Value == 1)
-		case "set_relative_addressing":
-			log.Printf("Received set_relative_addressing: %t", msg.Value == 1)
-			c.appState.SetRelativeAddressing(msg.Value == 1)
-		case "set_tracking_enabled":
-			log.Printf("Received set_tracking_enabled: %t", msg.Value == 1)
-			c.appState.SetTrackingEnabled(msg.Value == 1)
 		case "set_ip_ptr":
 			log.Printf("Received set_ip_ptr for IP %d to %d", msg.ID, msg.Ptr)
 			c.appState.SetIPPtr(msg.ID, msg.Ptr)
