@@ -6,17 +6,19 @@ EvoSoup is an experiment in digital evolution that attempts to simulate life at 
 
 ## The Concept
 
-The core of EvoSoup is a shared memory space called the "soup." This soup is initialized with a random sequence of simple instructions. A multitude of "Instruction Pointers" (IPs) concurrently execute this code. These IPs are not the organisms themselves; they are merely pointers, representing the focus of execution.
+The core of EvoSoup is a shared memory space called the "soup," initialized with random instructions. A multitude of "Instruction Pointers" (IPs) concurrently execute this code. The IPs are not organisms; they are simply the focus of execution.
 
-The instruction pointers are a fixed and limited resource. A code pattern can only perpetuate itself if it "captures" an IP. Capturing an IP simply means having code that runs when the IP passes through it. Since IPs just execute one instruction at a time and then increment, a pattern that can control an IP's flow (e.g., through loops or jumps) has effectively captured it.
+### Emergent Organisms and Competition
 
-This dynamic introduces a key element of competition. If a code pattern evolves to effectively use two or more IPs in parallel, it could outcompete other patterns for execution time. More complex behaviors could also emerge, such as programs that capture extra IPs, copy themselves elsewhere in the soup, and then release the captured IPs to run the new copies, achieving true replication. This highlights a central idea: the instruction pointers are *not* the organisms; the code patterns are.
+In EvoSoup, an "organism" is an emergent pattern of code that persists and propagates. There are no predefined boundaries for an organism, unlike in many artificial life projects. Survival depends on a pattern's ability to "capture" the limited supply of IPs. A pattern that can control an IP's flow (e.g., through loops or jumps) has effectively captured it.
 
-In this world, there are no predefined boundaries for an organism. Unlike many artificial life projects that explicitly define structures for replication, crossover, and resource management, EvoSoup starts with as little as possible. An "organism" is hypothesized to be an emergent pattern within the soup—a self-sustaining or self-replicating block of code that persists and propagates over time.
+This dynamic creates competition for CPU time, which is the only true resource. Multiple IPs run in parallel without thread safety, resulting in a chaotic race for execution. More complex behaviors can emerge, such as patterns that capture multiple IPs, copy themselves elsewhere in the soup, and release the new IPs to run the copies, achieving true replication. A pattern's fitness is simply a measure of its ability to be executed and re-executed.
 
-The only true resource constraint is the competition for CPU time. Multiple IPs run in parallel without any thread safety, meaning their execution is a chaotic race. This ties the simulation directly to the dynamics of the physical computer, where the ability of a code pattern to be executed and re-executed is its measure of fitness.
+### Comparison to Cellular Automata
 
-Evolution in EvoSoup is therefore a process of discovery, searching for emergent, resilient patterns of computation in a sea of randomness.
+EvoSoup shares similarities with Cellular Automata (CAs) like Conway's Game of Life, as both systems feature emergent complexity from simple, local rules. However, a crucial difference lies in their update mechanism. In a traditional CA, the entire grid of cells is updated synchronously in discrete time steps. Every cell's next state is calculated based on its neighbors, and then the entire system transitions to the next generation at once.
+
+EvoSoup, by contrast, is updated asynchronously. The Instruction Pointers (IPs) run in parallel, and each one modifies the soup according to the instruction it is currently executing. This creates a dynamic where different code patterns are not updated in lock-step but are actively competing for execution cycles. This asynchronicity allows for a more fluid and competitive environment where patterns can gain an advantage by manipulating IP flow, rather than being bound to a global clock.
 
 ## How to Run
 
