@@ -11,7 +11,7 @@ const NumAluBits = 4 // For websocket.go
 
 // ALU Opcodes
 const (
-	OP_NOP    uint8 = 0
+	OP_CPY    uint8 = 0
 	OP_ADD    uint8 = 1
 	OP_SUB    uint8 = 2
 	OP_NAND   uint8 = 3
@@ -38,7 +38,7 @@ type OpcodeInfo struct {
 // GetOpcodes returns a list of all defined opcodes and their values.
 func GetOpcodes() []OpcodeInfo {
 	return []OpcodeInfo{
-		{Name: "NOP", Value: OP_NOP},
+		{Name: "CPY", Value: OP_CPY},
 		{Name: "ADD", Value: OP_ADD},
 		{Name: "SUB", Value: OP_SUB},
 		{Name: "NAND", Value: OP_NAND},
@@ -183,8 +183,8 @@ func (ip *IP) Step() {
 	jumpTaken := false
 
 	switch aluOp {
-	case OP_NOP:
-		result = int8(instruction)
+	case OP_CPY:
+		result = int8(instruction) // Copy self
 	case OP_ADD:
 		result = src1Val + src2Val
 	case OP_SUB:
@@ -209,25 +209,25 @@ func (ip *IP) Step() {
 		result = src1Val - 1
 	case OP_JMP:
 		jumpTaken = true
-		result = int8(instruction) // Preserve instruction
+		result = int8(instruction) // Copy self
 	case OP_JZ:
 		if src1Val == 0 {
 			jumpTaken = true
 		}
-		result = int8(instruction) // Preserve instruction
+		result = int8(instruction) // Copy self
 	case OP_JNZ:
 		if src1Val != 0 {
 			jumpTaken = true
 		}
-		result = int8(instruction) // Preserve instruction
+		result = int8(instruction) // Copy self
 	case OP_JNEG:
 		if src1Val < 0 {
 			jumpTaken = true
 		}
-		result = int8(instruction) // Preserve instruction
+		result = int8(instruction) // Copy self
 	default:
-		// Undefined opcodes are NOPs
-		result = int8(instruction)
+		// Undefined opcodes are CPYs
+		result = int8(instruction) // Copy self
 	}
 
 	// --- 2. Write Phase ---
