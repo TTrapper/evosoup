@@ -20,6 +20,10 @@ EvoSoup shares similarities with Cellular Automata (CAs) like Conway's Game of L
 
 EvoSoup, by contrast, is updated asynchronously. The Instruction Pointers (IPs) run in parallel, and each one modifies the soup according to the instruction it is currently executing. This creates a dynamic where different code patterns are not updated in lock-step but are actively competing for execution cycles. This asynchronicity allows for a more fluid and competitive environment where patterns can gain an advantage by manipulating IP flow, rather than being bound to a global clock.
 
+### Video Explainer
+
+Watch a video explanation of EvoSoup here: https://youtu.be/KN-FWq_c2c4
+
 ## How to Run
 
 1.  **Install Go:** Make sure you have Go installed on your system.
